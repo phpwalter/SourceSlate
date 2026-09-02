@@ -4,7 +4,21 @@
 declare(strict_types=1);
 
 use SourceSlate\Application;
+use Symfony\Component\Console\Input\ArgvInput;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 
-exit((new Application())->run());
+/** @var list<string> $arguments */
+$arguments = $_SERVER['argv'] ?? [];
+$firstArgument = $arguments[1] ?? null;
+
+if (
+    $firstArgument !== null
+    && $firstArgument !== ''
+    && !str_starts_with($firstArgument, '-')
+    && !in_array($firstArgument, ['build', 'list', 'help', 'completion'], true)
+) {
+    array_splice($arguments, 1, 0, ['build']);
+}
+
+exit((new Application())->run(new ArgvInput($arguments)));
