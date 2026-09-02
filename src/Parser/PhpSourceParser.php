@@ -1,19 +1,5 @@
 <?php
 
-/**
- * @file PhpSourceParser.php
- * @path src/Parser/PhpSourceParser.php
- * @version 1.0.0
- * @date 2026-09-02
- * @author Walter Torres
- * @copyright Copyright 2026, Walter Torres.
- * @license Proprietary
- * @maintainer SourceSlate Team
- * @status dev
- *
- * Implements deterministic PHP discovery and extraction of file, type, method, and PHPDoc metadata.
- */
-
 declare(strict_types=1);
 
 namespace SourceSlate\Parser;
@@ -24,21 +10,18 @@ use PhpParser\ParserFactory;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use SourceSlate\Configuration\Configuration;
+use SourceSlate\Model\ConstantDocumentation;
+use SourceSlate\Model\EnumCaseDocumentation;
 use SourceSlate\Model\FileDocumentation;
+use SourceSlate\Model\FunctionDocumentation;
 use SourceSlate\Model\MethodDocumentation;
 use SourceSlate\Model\ProjectDocumentation;
+use SourceSlate\Model\PropertyDocumentation;
 use SourceSlate\Model\TypeDocumentation;
 use SourceSlate\PhpDoc\Model\PhpDocBlock;
 use SourceSlate\PhpDoc\Parser\PhpDocParser;
 use SplFileInfo;
 
-/**
- * Parses PHP source files into SourceSlate's renderer-independent model.
- *
- * Source discovery is deterministic. Native declarations are extracted from the
- * nikic/php-parser AST while PHPDoc grammar remains delegated to the shared
- * PHPDoc parser and semantic tag handlers.
- */
 final class PhpSourceParser implements SourceParserInterface
 {
     public function parse(string $projectRoot, Configuration $configuration): ProjectDocumentation
@@ -53,9 +36,7 @@ final class PhpSourceParser implements SourceParserInterface
                 continue;
             }
 
-            $iterator = new RecursiveIteratorIterator(
-                new RecursiveDirectoryIterator($absoluteSource, RecursiveDirectoryIterator::SKIP_DOTS),
-            );
+            $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($absoluteSource, RecursiveDirectoryIterator::SKIP_DOTS));
 
             /** @var SplFileInfo $file */
             foreach ($iterator as $file) {
@@ -75,93 +56,65 @@ final class PhpSourceParser implements SourceParserInterface
 
                 $ast = $parser->parse($code) ?? [];
                 $types = $this->extractTypes($ast, $relativePath, $phpDocParser);
-                $symbols = array_map(
-                    static fn (TypeDocumentation $type): string => $type->fullyQualifiedName,
-                    $types,
-                );
-                $filePhpDoc = $this->firstPhpDoc($ast, $phpDocParser);
+                $functions = $this->extractFunctions($ast, $relativePath, $phpDocParser);
+                $symbols = array_map(static fn (TypeDocumentation $type): string => $type->fullyQualifiedName, $types);
+                foreach ($functions as $function) {
+                    $symbols[] = $function->fullyQualifiedName;
+                }
+                sort($symbols, SORT_STRING);
 
-                $files[] = new FileDocumentation(
-                    $relativePath,
-                    $symbols,
-                    $filePhpDoc?->summary,
-                    $filePhpDoc,
-                    $types,
-                    $code,
-                );
+                $filePhpDoc = $this->firstPhpDoc($ast, $phpDocParser);
+                $files[] = new FileDocumentation($relativePath, $symbols, $filePhpDoc?->summary, $filePhpDoc, $types, $code, $functions);
             }
         }
 
-        usort(
-            $files,
-            static fn (FileDocumentation $left, FileDocumentation $right): int => $left->path <=> $right->path,
-        );
+        usort($files, static fn (FileDocumentation $a, FileDocumentation $b): int => $a->path <=> $b->path);
 
         return new ProjectDocumentation($configuration->projectName, $files);
     }
 
-    /**
-     * @param list<Node\Stmt> $ast
-     * @return list<TypeDocumentation>
-     */
+    /** @param list<Node\Stmt> $ast @return list<TypeDocumentation> */
     private function extractTypes(array $ast, string $sourcePath, PhpDocParser $phpDocParser): array
     {
         $types = [];
-
         foreach ($ast as $statement) {
             if ($statement instanceof Node\Stmt\Namespace_) {
                 $namespace = $statement->name?->toString() ?? '';
-                $types = array_merge(
-                    $types,
-                    $this->extractTypesFromStatements($statement->stmts, $namespace, $sourcePath, $phpDocParser),
-                );
-                continue;
-            }
-
-            if ($statement instanceof Node\Stmt\ClassLike && $statement->name !== null) {
+                foreach ($statement->stmts as $inner) {
+                    if ($inner instanceof Node\Stmt\ClassLike && $inner->name !== null) {
+                        $types[] = $this->mapType($inner, $namespace, $sourcePath, $phpDocParser);
+                    }
+                }
+            } elseif ($statement instanceof Node\Stmt\ClassLike && $statement->name !== null) {
                 $types[] = $this->mapType($statement, '', $sourcePath, $phpDocParser);
             }
         }
 
-        usort(
-            $types,
-            static fn (TypeDocumentation $left, TypeDocumentation $right): int => $left->line <=> $right->line,
-        );
-
+        usort($types, static fn (TypeDocumentation $a, TypeDocumentation $b): int => $a->line <=> $b->line);
         return $types;
     }
 
-    /**
-     * @param list<Node\Stmt> $statements
-     * @return list<TypeDocumentation>
-     */
-    private function extractTypesFromStatements(
-        array $statements,
-        string $namespace,
-        string $sourcePath,
-        PhpDocParser $phpDocParser,
-    ): array {
-        $finder = new NodeFinder();
-        $types = [];
-
-        /** @var Node\Stmt\ClassLike $classLike */
-        foreach ($finder->findInstanceOf($statements, Node\Stmt\ClassLike::class) as $classLike) {
-            if ($classLike->name === null) {
-                continue;
+    /** @param list<Node\Stmt> $ast @return list<FunctionDocumentation> */
+    private function extractFunctions(array $ast, string $sourcePath, PhpDocParser $phpDocParser): array
+    {
+        $functions = [];
+        foreach ($ast as $statement) {
+            if ($statement instanceof Node\Stmt\Namespace_) {
+                $namespace = $statement->name?->toString() ?? '';
+                foreach ($statement->stmts as $inner) {
+                    if ($inner instanceof Node\Stmt\Function_) {
+                        $functions[] = $this->mapFunction($inner, $namespace, $sourcePath, $phpDocParser);
+                    }
+                }
+            } elseif ($statement instanceof Node\Stmt\Function_) {
+                $functions[] = $this->mapFunction($statement, '', $sourcePath, $phpDocParser);
             }
-
-            $types[] = $this->mapType($classLike, $namespace, $sourcePath, $phpDocParser);
         }
-
-        return $types;
+        return $functions;
     }
 
-    private function mapType(
-        Node\Stmt\ClassLike $classLike,
-        string $namespace,
-        string $sourcePath,
-        PhpDocParser $phpDocParser,
-    ): TypeDocumentation {
+    private function mapType(Node\Stmt\ClassLike $classLike, string $namespace, string $sourcePath, PhpDocParser $phpDocParser): TypeDocumentation
+    {
         $name = $classLike->name?->toString() ?? '';
         $fullyQualifiedName = $namespace !== '' ? $namespace . '\\' . $name : $name;
         $extends = [];
@@ -179,19 +132,43 @@ final class PhpSourceParser implements SourceParserInterface
         }
 
         $traits = [];
-        foreach ($classLike->stmts as $statement) {
-            if (!$statement instanceof Node\Stmt\TraitUse) {
-                continue;
-            }
-
-            foreach ($statement->traits as $trait) {
-                $traits[] = $trait->toString();
-            }
-        }
-
         $methods = [];
-        foreach ($classLike->getMethods() as $method) {
-            $methods[] = $this->mapMethod($method, $phpDocParser);
+        $properties = [];
+        $constants = [];
+        $enumCases = [];
+
+        foreach ($classLike->stmts as $statement) {
+            if ($statement instanceof Node\Stmt\TraitUse) {
+                foreach ($statement->traits as $trait) {
+                    $traits[] = $trait->toString();
+                }
+            } elseif ($statement instanceof Node\Stmt\ClassMethod) {
+                $methods[] = $this->mapMethod($statement, $phpDocParser);
+            } elseif ($statement instanceof Node\Stmt\Property) {
+                $visibility = $statement->isPrivate() ? 'private' : ($statement->isProtected() ? 'protected' : 'public');
+                foreach ($statement->props as $property) {
+                    $properties[] = new PropertyDocumentation(
+                        $property->name->toString(),
+                        $visibility,
+                        $statement->isStatic(),
+                        $statement->isReadonly(),
+                        $statement->type !== null ? $this->typeToString($statement->type) : null,
+                        max(1, $statement->getStartLine()),
+                        $this->parseDocComment($statement, $phpDocParser),
+                    );
+                }
+            } elseif ($statement instanceof Node\Stmt\ClassConst) {
+                $visibility = $statement->isPrivate() ? 'private' : ($statement->isProtected() ? 'protected' : 'public');
+                foreach ($statement->consts as $constant) {
+                    $constants[] = new ConstantDocumentation($constant->name->toString(), $visibility, max(1, $statement->getStartLine()), $this->parseDocComment($statement, $phpDocParser));
+                }
+            } elseif ($statement instanceof Node\Stmt\EnumCase) {
+                $value = null;
+                if ($statement->expr instanceof Node\Scalar\String_ || $statement->expr instanceof Node\Scalar\Int_) {
+                    $value = (string) $statement->expr->value;
+                }
+                $enumCases[] = new EnumCaseDocumentation($statement->name->toString(), max(1, $statement->getStartLine()), $value, $this->parseDocComment($statement, $phpDocParser));
+            }
         }
 
         return new TypeDocumentation(
@@ -206,13 +183,45 @@ final class PhpSourceParser implements SourceParserInterface
             $traits,
             $methods,
             $this->parseDocComment($classLike, $phpDocParser),
+            $properties,
+            $constants,
+            $enumCases,
         );
     }
 
     private function mapMethod(Node\Stmt\ClassMethod $method, PhpDocParser $phpDocParser): MethodDocumentation
     {
+        return new MethodDocumentation(
+            $method->name->toString(),
+            $method->isPrivate() ? 'private' : ($method->isProtected() ? 'protected' : 'public'),
+            $method->isStatic(),
+            $this->mapParameters($method->params),
+            $method->returnType !== null ? $this->typeToString($method->returnType) : null,
+            max(1, $method->getStartLine()),
+            $this->parseDocComment($method, $phpDocParser),
+        );
+    }
+
+    private function mapFunction(Node\Stmt\Function_ $function, string $namespace, string $sourcePath, PhpDocParser $phpDocParser): FunctionDocumentation
+    {
+        $name = $function->name->toString();
+        return new FunctionDocumentation(
+            $name,
+            $namespace !== '' ? $namespace . '\\' . $name : $name,
+            $namespace,
+            $sourcePath,
+            $this->mapParameters($function->params),
+            $function->returnType !== null ? $this->typeToString($function->returnType) : null,
+            max(1, $function->getStartLine()),
+            $this->parseDocComment($function, $phpDocParser),
+        );
+    }
+
+    /** @param list<Node\Param> $params @return list<string> */
+    private function mapParameters(array $params): array
+    {
         $parameters = [];
-        foreach ($method->params as $parameter) {
+        foreach ($params as $parameter) {
             $text = '';
             if ($parameter->type !== null) {
                 $text .= $this->typeToString($parameter->type) . ' ';
@@ -226,18 +235,7 @@ final class PhpSourceParser implements SourceParserInterface
             $text .= '$' . (is_string($parameter->var->name) ? $parameter->var->name : 'parameter');
             $parameters[] = $text;
         }
-
-        $visibility = $method->isPrivate() ? 'private' : ($method->isProtected() ? 'protected' : 'public');
-
-        return new MethodDocumentation(
-            $method->name->toString(),
-            $visibility,
-            $method->isStatic(),
-            $parameters,
-            $method->returnType !== null ? $this->typeToString($method->returnType) : null,
-            max(1, $method->getStartLine()),
-            $this->parseDocComment($method, $phpDocParser),
-        );
+        return $parameters;
     }
 
     private function typeToString(Node $type): string
@@ -245,25 +243,18 @@ final class PhpSourceParser implements SourceParserInterface
         if ($type instanceof Node\Identifier || $type instanceof Node\Name) {
             return $type->toString();
         }
-
         if ($type instanceof Node\NullableType) {
             return '?' . $this->typeToString($type->type);
         }
-
         if ($type instanceof Node\UnionType) {
             return implode('|', array_map(fn (Node $inner): string => $this->typeToString($inner), $type->types));
         }
-
         if ($type instanceof Node\IntersectionType) {
             return implode('&', array_map(fn (Node $inner): string => $this->typeToString($inner), $type->types));
         }
-
         return (string) $type;
     }
 
-    /**
-     * @return 'class'|'interface'|'trait'|'enum'
-     */
     private function typeKind(Node\Stmt\ClassLike $classLike): string
     {
         return match (true) {
@@ -277,13 +268,10 @@ final class PhpSourceParser implements SourceParserInterface
     private function parseDocComment(Node $node, PhpDocParser $parser): ?PhpDocBlock
     {
         $comment = $node->getDocComment();
-
         return $comment !== null ? $parser->parse($comment->getText()) : null;
     }
 
-    /**
-     * @param list<Node\Stmt> $ast
-     */
+    /** @param list<Node\Stmt> $ast */
     private function firstPhpDoc(array $ast, PhpDocParser $parser): ?PhpDocBlock
     {
         foreach ($ast as $node) {
@@ -292,24 +280,19 @@ final class PhpSourceParser implements SourceParserInterface
                 return $parser->parse($comment->getText());
             }
         }
-
         return null;
     }
 
-    /**
-     * @param list<non-empty-string> $excludedPaths
-     */
+    /** @param list<non-empty-string> $excludedPaths */
     private function isExcluded(string $relativePath, array $excludedPaths): bool
     {
         $normalized = str_replace('\\', '/', $relativePath);
-
         foreach ($excludedPaths as $excludedPath) {
             $excluded = trim(str_replace('\\', '/', $excludedPath), '/');
             if ($excluded !== '' && ($normalized === $excluded || str_starts_with($normalized, $excluded . '/'))) {
                 return true;
             }
         }
-
         return false;
     }
 
@@ -322,7 +305,6 @@ final class PhpSourceParser implements SourceParserInterface
     {
         $root = rtrim(str_replace('\\', '/', realpath($root) ?: $root), '/');
         $path = str_replace('\\', '/', $path);
-
         return ltrim(substr($path, strlen($root)), '/');
     }
 }
