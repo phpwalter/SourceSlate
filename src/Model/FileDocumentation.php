@@ -18,11 +18,13 @@ declare(strict_types=1);
 
 namespace SourceSlate\Model;
 
+use SourceSlate\PhpDoc\Model\PhpDocBlock;
+
 /**
  * Represents one parsed PHP source file in the documentation model.
  *
- * This initial model intentionally captures stable file-level facts only.
- * Type/member relationships will be layered on without changing renderer contracts.
+ * File-level PHPDoc remains renderer-neutral and preserves unknown tags. Type
+ * and member relationships can be added without exposing parser-library ASTs.
  */
 final readonly class FileDocumentation
 {
@@ -34,6 +36,7 @@ final readonly class FileDocumentation
         public string $path,
         public array $declaredSymbols,
         public ?string $summary = null,
+        public ?PhpDocBlock $phpDoc = null,
     ) {
     }
 }

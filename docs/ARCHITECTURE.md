@@ -7,12 +7,42 @@ SourceSlate is a static documentation generator for PHP source code and PHPDoc. 
 ## Core boundaries
 
 1. **Configuration** resolves YAML and zero-configuration defaults.
-2. **Parser** reads PHP source and PHPDoc and produces normalized documentation data.
-3. **Model** contains renderer-independent project, file, type, member, relationship, PHPDoc, and source-location objects.
-4. **Relationship resolver** links declared structural relationships after parsing.
-5. **Diagnostics** records conflicts and unsupported states without silently rewriting meaning.
-6. **Renderer** produces static HTML, search indexes, source-browser pages, and assets.
-7. **Source header writer** is an explicit opt-in mutator responsible only for `@sourceslate` header links.
+2. **PHP source parser** reads PHP syntax through `nikic/php-parser` and discovers files, declarations, source locations, and native type relationships.
+3. **PHPDoc parser** tokenizes and parses each PHPDoc block once through `phpstan/phpdoc-parser`.
+4. **Tag dispatcher** routes already-parsed PHPDoc tags to semantic handlers. A handler interprets one tag contract; it never reimplements PHPDoc or type grammar.
+5. **Model** contains renderer-independent project, file, type, member, relationship, PHPDoc, and source-location objects. Vendor AST objects do not cross this boundary.
+6. **Relationship resolver** links declared structural relationships after parsing.
+7. **Diagnostics** records conflicts and unsupported states without silently rewriting meaning.
+8. **Renderer** produces static HTML, search indexes, source-browser pages, and assets.
+9. **Source header writer** is an explicit opt-in mutator responsible only for `@sourceslate` header links.
+
+## PHPDoc parsing architecture
+
+SourceSlate deliberately does not use one independent parser for every PHPDoc tag. That design duplicates grammar and becomes brittle for PHPStan types, generics, array shapes, callable signatures, and templates.
+
+The pipeline is:
+
+```text
+Raw PHPDoc
+   |
+   v
+PHPStan Lexer + PHPDoc Parser + Type Parser
+   |
+   v
+TagDispatcher
+   |-- ParamTagHandler
+   |-- ReturnTagHandler
+   |-- ThrowsTagHandler
+   |-- SourceSlateTagHandler
+   `-- UnknownTagHandler
+   |
+   v
+Renderer-neutral PHPDoc model
+```
+
+Tag handlers receive parsed AST nodes. They only map supported semantics into SourceSlate data. Shared syntax parsing remains centralized. Unsupported tags are preserved by name and raw value so SourceSlate does not destroy metadata it does not yet understand.
+
+The initial semantic handlers cover `@param`, `@return`, `@throws`, and SourceSlate's `@sourceslate` link. Additional standard tags are added as handlers without changing the parser core.
 
 ## 1.0 relationship scope
 

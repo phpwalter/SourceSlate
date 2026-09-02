@@ -11,7 +11,7 @@
  * @maintainer SourceSlate Team
  * @status dev
  *
- * Implements deterministic PHP source discovery and AST-backed symbol extraction.
+ * Implements deterministic PHP source discovery, AST extraction, and file-level PHPDoc parsing.
  */
 
 declare(strict_types=1);
@@ -26,6 +26,8 @@ use RecursiveIteratorIterator;
 use SourceSlate\Configuration\Configuration;
 use SourceSlate\Model\FileDocumentation;
 use SourceSlate\Model\ProjectDocumentation;
+use SourceSlate\PhpDoc\Model\PhpDocBlock;
+use SourceSlate\PhpDoc\Parser\PhpDocParser;
 use SplFileInfo;
 
 /**
@@ -33,12 +35,15 @@ use SplFileInfo;
  *
  * Source files are discovered recursively, excluded paths are filtered before
  * parsing, and output is sorted by project-relative path for deterministic builds.
+ * PHPDoc is parsed through one shared grammar pipeline; tag handlers only add
+ * semantic interpretation after PHPStan has parsed the comment.
  */
 final class PhpSourceParser implements SourceParserInterface
 {
     public function parse(string $projectRoot, Configuration $configuration): ProjectDocumentation
     {
         $parser = (new ParserFactory())->createForNewestSupportedVersion();
+        $phpDocParser = new PhpDocParser();
         $nodeFinder = new NodeFinder();
         $files = [];
 
@@ -81,7 +86,13 @@ final class PhpSourceParser implements SourceParserInterface
                 }
 
                 sort($symbols, SORT_STRING);
-                $files[] = new FileDocumentation($relativePath, $symbols);
+                $phpDoc = $this->firstPhpDoc($ast, $phpDocParser);
+                $files[] = new FileDocumentation(
+                    $relativePath,
+                    $symbols,
+                    $phpDoc?->summary,
+                    $phpDoc,
+                );
             }
         }
 
@@ -91,6 +102,27 @@ final class PhpSourceParser implements SourceParserInterface
         );
 
         return new ProjectDocumentation($configuration->projectName, $files);
+    }
+
+    /**
+     * Returns the first doc comment attached to a top-level node.
+     *
+     * A conventional file header immediately preceding `declare(strict_types=1)`
+     * is attached by nikic/php-parser to that declaration and therefore becomes
+     * the file-level documentation block.
+     *
+     * @param list<Node\Stmt> $ast
+     */
+    private function firstPhpDoc(array $ast, PhpDocParser $parser): ?PhpDocBlock
+    {
+        foreach ($ast as $node) {
+            $comment = $node->getDocComment();
+            if ($comment !== null) {
+                return $parser->parse($comment->getText());
+            }
+        }
+
+        return null;
     }
 
     /**
