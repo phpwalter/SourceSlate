@@ -3,7 +3,7 @@
 /**
  * @file BuildCommand.php
  * @path src/Command/BuildCommand.php
- * @version 1.4.0
+ * @version 1.5.0
  * @date 2026-09-10
  * @author Walter Torres
  * @copyright Copyright 2026, Walter Torres.
@@ -47,11 +47,12 @@ final class BuildCommand extends Command
             ->addOption('output', null, InputOption::VALUE_REQUIRED, 'Output directory. Required for remote Git sources.')
             ->addOption('force-output', null, InputOption::VALUE_NONE, 'Allow replacement of a non-empty output directory that is not already SourceSlate-managed.')
             ->addOption('branch', null, InputOption::VALUE_REQUIRED, 'Remote Git branch to document.')
-            ->addOption('ref', null, InputOption::VALUE_REQUIRED, 'Remote Git tag, branch ref, or commit SHA to document.')
+            ->addOption('tag', null, InputOption::VALUE_REQUIRED, 'Remote Git tag to document.')
+            ->addOption('ref', null, InputOption::VALUE_REQUIRED, 'Remote Git branch ref, tag ref, or commit SHA to document.')
             ->addOption('source-path', null, InputOption::VALUE_REQUIRED, 'Subdirectory within the resolved source workspace.')
             ->addOption('refresh', null, InputOption::VALUE_NONE, 'Force remote revalidation when supported.')
             ->addOption('offline', null, InputOption::VALUE_NONE, 'Use only the persistent Git cache; never contact the remote.')
-            ->addOption('recurse-submodules', null, InputOption::VALUE_NONE, 'Fetch submodules when remote Git support enables them.')
+            ->addOption('recurse-submodules', null, InputOption::VALUE_NONE, 'Fetch submodules for the resolved worktree.')
             ->addOption('update-source', null, InputOption::VALUE_NONE, 'Update source headers with @sourceslate links when supported.')
             ->addOption('check', null, InputOption::VALUE_NONE, 'Run documentation consistency checks when supported.');
     }
@@ -65,6 +66,7 @@ final class BuildCommand extends Command
                 source: (string) $input->getArgument('project'),
                 output: $input->getOption('output') !== null ? (string) $input->getOption('output') : null,
                 branch: $input->getOption('branch') !== null ? (string) $input->getOption('branch') : null,
+                tag: $input->getOption('tag') !== null ? (string) $input->getOption('tag') : null,
                 ref: $input->getOption('ref') !== null ? (string) $input->getOption('ref') : null,
                 sourcePath: $input->getOption('source-path') !== null ? (string) $input->getOption('source-path') : null,
                 refresh: (bool) $input->getOption('refresh'),
