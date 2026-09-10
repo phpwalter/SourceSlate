@@ -10,19 +10,29 @@ final readonly class SourceRequest
         public string $source,
         public ?string $output = null,
         public ?string $branch = null,
+        public ?string $tag = null,
         public ?string $ref = null,
         public ?string $sourcePath = null,
         public bool $refresh = false,
         public bool $offline = false,
         public bool $recurseSubmodules = false,
     ) {
-        if ($branch !== null && $ref !== null) {
-            throw new \InvalidArgumentException('--branch and --ref cannot be used together.');
+        $selectors = array_filter([$branch, $tag, $ref], static fn (?string $value): bool => $value !== null);
+        if (count($selectors) > 1) {
+            throw new \InvalidArgumentException('--branch, --tag, and --ref are mutually exclusive.');
         }
     }
 
     public function requestedRef(): ?string
     {
-        return $this->branch !== null ? 'refs/heads/' . $this->branch : $this->ref;
+        if ($this->branch !== null) {
+            return 'refs/heads/' . $this->branch;
+        }
+
+        if ($this->tag !== null) {
+            return 'refs/tags/' . $this->tag;
+        }
+
+        return $this->ref;
     }
 }
