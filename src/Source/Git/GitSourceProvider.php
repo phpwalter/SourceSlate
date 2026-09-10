@@ -27,52 +27,58 @@ final readonly class GitSourceProvider
 
         $identity = GitRepositoryIdentity::fromUrl($request->source);
         $this->cache->ensureRepositoryDirectory($identity);
-        $metadata = $this->cache->loadMetadata($identity);
-        $bare = $this->cache->bareRepository($identity);
-        $fetched = false;
+        $lock = $this->cache->lock($identity);
+        $lock->acquire();
 
-        if (!is_dir($bare)) {
-            if ($request->offline) {
-                throw new \RuntimeException('Repository is not available in cache and --offline was requested.');
+        try {
+            $metadata = $this->cache->loadMetadata($identity);
+            $bare = $this->cache->bareRepository($identity);
+            $fetched = false;
+
+            if (!is_dir($bare)) {
+                if ($request->offline) {
+                    throw new \RuntimeException('Repository is not available in cache and --offline was requested.');
+                }
+
+                $this->git->run(['clone', '--bare', $identity->originalUrl, $bare]);
+                $fetched = true;
+            } elseif (!$request->offline) {
+                $this->git->run(['--git-dir=' . $bare, 'fetch', '--prune', '--tags', 'origin']);
+                $fetched = true;
             }
 
-            $this->git->run(['clone', '--bare', $identity->originalUrl, $bare]);
-            $fetched = true;
-        } elseif (!$request->offline) {
-            $this->git->run(['--git-dir=' . $bare, 'fetch', '--prune', '--tags', 'origin']);
-            $fetched = true;
-        }
+            $gitRef = $this->resolveRequestedRef($request, $bare);
+            $commit = $this->git->run(['--git-dir=' . $bare, 'rev-parse', $gitRef->revision . '^{commit}']);
+            $worktree = $this->prepareWorktree($identity, $bare, $commit);
 
-        $gitRef = $this->resolveRequestedRef($request, $bare);
-        $commit = $this->git->run(['--git-dir=' . $bare, 'rev-parse', $gitRef->revision . '^{commit}']);
-        $worktree = $this->cache->worktreeDirectory($identity, $commit);
-
-        if (!is_dir($worktree)) {
-            $parent = dirname($worktree);
-            if (!is_dir($parent) && !mkdir($parent, 0777, true) && !is_dir($parent)) {
-                throw new \RuntimeException(sprintf('Unable to create worktree directory: %s', $parent));
+            if ($request->recurseSubmodules) {
+                $this->git->run(['submodule', 'update', '--init', '--recursive'], $worktree);
             }
 
-            $this->git->run(['--git-dir=' . $bare, 'worktree', 'add', '--detach', $worktree, $commit]);
+            $root = $this->resolveSourceRoot($worktree, $request->sourcePath);
+            $this->cache->saveMetadata($metadata->withResolution($gitRef->requested, $commit, $fetched));
+
+            return new SourceWorkspace(
+                root: $root,
+                remote: true,
+                repository: $identity->canonicalUrl,
+                requestedRef: $gitRef->requested,
+                resolvedCommit: $commit,
+                offline: $request->offline,
+            );
+        } finally {
+            $lock->release();
         }
-
-        $root = $this->resolveSourceRoot($worktree, $request->sourcePath);
-        $this->cache->saveMetadata($metadata->withResolution($gitRef->requested, $commit, $fetched));
-
-        return new SourceWorkspace(
-            root: $root,
-            remote: true,
-            repository: $identity->canonicalUrl,
-            requestedRef: $gitRef->requested,
-            resolvedCommit: $commit,
-            offline: $request->offline,
-        );
     }
 
     private function resolveRequestedRef(SourceRequest $request, string $bare): GitRef
     {
         if ($request->branch !== null) {
             return GitRef::branch($request->branch);
+        }
+
+        if ($request->tag !== null) {
+            return GitRef::tag($request->tag);
         }
 
         if ($request->ref !== null) {
@@ -86,6 +92,29 @@ final readonly class GitSourceProvider
         }
 
         return GitRef::defaultBranch(substr($symbolic, strlen($prefix)));
+    }
+
+    private function prepareWorktree(GitRepositoryIdentity $identity, string $bare, string $commit): string
+    {
+        $worktree = $this->cache->worktreeDirectory($identity, $commit);
+
+        if (is_dir($worktree)) {
+            $status = $this->git->run(['status', '--porcelain'], $worktree);
+            if ($status === '') {
+                return $worktree;
+            }
+
+            $worktree = $this->cache->alternateWorktreeDirectory($identity, $commit);
+        }
+
+        $parent = dirname($worktree);
+        if (!is_dir($parent) && !mkdir($parent, 0777, true) && !is_dir($parent)) {
+            throw new \RuntimeException(sprintf('Unable to create worktree directory: %s', $parent));
+        }
+
+        $this->git->run(['--git-dir=' . $bare, 'worktree', 'add', '--detach', $worktree, $commit]);
+
+        return $worktree;
     }
 
     private function resolveSourceRoot(string $worktree, ?string $sourcePath): string
