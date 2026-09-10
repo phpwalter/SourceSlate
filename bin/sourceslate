@@ -11,12 +11,13 @@ require dirname(__DIR__) . '/vendor/autoload.php';
 /** @var list<string> $arguments */
 $arguments = $_SERVER['argv'] ?? [];
 $firstArgument = $arguments[1] ?? null;
+$commands = ['build', 'list', 'help', 'completion', 'cache:list', 'cache:info'];
 
 if (
     $firstArgument !== null
     && $firstArgument !== ''
     && !str_starts_with($firstArgument, '-')
-    && !in_array($firstArgument, ['build', 'list', 'help', 'completion'], true)
+    && !in_array($firstArgument, $commands, true)
 ) {
     array_splice($arguments, 1, 0, ['build']);
 }
