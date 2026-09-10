@@ -1,0 +1,18 @@
+<?php
+
+declare(strict_types=1);
+
+namespace SourceSlate\Source;
+
+final readonly class SourceWorkspace
+{
+    public function __construct(
+        public string $root,
+        public bool $remote,
+        public ?string $repository = null,
+        public ?string $requestedRef = null,
+        public ?string $resolvedCommit = null,
+        public bool $offline = false,
+    ) {
+    }
+}
