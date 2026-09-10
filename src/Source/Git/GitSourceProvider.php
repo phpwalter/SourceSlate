@@ -79,10 +79,10 @@ final readonly class GitSourceProvider
             return GitRef::explicit($request->ref);
         }
 
-        $symbolic = $this->git->run(['--git-dir=' . $bare, 'symbolic-ref', 'refs/remotes/origin/HEAD']);
-        $prefix = 'refs/remotes/origin/';
+        $symbolic = $this->git->run(['--git-dir=' . $bare, 'symbolic-ref', 'HEAD']);
+        $prefix = 'refs/heads/';
         if (!str_starts_with($symbolic, $prefix)) {
-            throw new \RuntimeException(sprintf('Unable to resolve remote default branch from %s.', $symbolic));
+            throw new \RuntimeException(sprintf('Unable to resolve repository default branch from %s.', $symbolic));
         }
 
         return GitRef::defaultBranch(substr($symbolic, strlen($prefix)));
