@@ -3,8 +3,8 @@
 /**
  * @file Application.php
  * @path src/Application.php
- * @version 1.0.0
- * @date 2026-09-02
+ * @version 1.1.0
+ * @date 2026-09-10
  * @author Walter Torres
  * @copyright Copyright 2026, Walter Torres.
  * @license Proprietary
@@ -19,6 +19,8 @@ declare(strict_types=1);
 namespace SourceSlate;
 
 use SourceSlate\Command\BuildCommand;
+use SourceSlate\Command\Cache\CacheInfoCommand;
+use SourceSlate\Command\Cache\CacheListCommand;
 use Symfony\Component\Console\Application as SymfonyApplication;
 
 /**
@@ -35,6 +37,8 @@ final class Application extends SymfonyApplication
         parent::__construct('SourceSlate', '0.1.0-dev');
 
         $this->add(new BuildCommand());
+        $this->add(new CacheListCommand());
+        $this->add(new CacheInfoCommand());
         $this->setDefaultCommand('build', false);
     }
 }
