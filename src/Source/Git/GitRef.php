@@ -23,6 +23,16 @@ final readonly class GitRef
         return new self($branch, 'refs/heads/' . $branch, 'branch');
     }
 
+    public static function tag(string $tag): self
+    {
+        $tag = trim($tag);
+        if ($tag === '') {
+            throw new \InvalidArgumentException('Git tag cannot be empty.');
+        }
+
+        return new self($tag, 'refs/tags/' . $tag, 'tag');
+    }
+
     public static function explicit(string $ref): self
     {
         $ref = trim($ref);
