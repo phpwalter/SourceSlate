@@ -27,20 +27,24 @@ final readonly class GitSourceProvider
 
         $identity = GitRepositoryIdentity::fromUrl($request->source);
         $this->cache->ensureRepositoryDirectory($identity);
+        $metadata = $this->cache->loadMetadata($identity);
         $bare = $this->cache->bareRepository($identity);
+        $fetched = false;
 
         if (!is_dir($bare)) {
             if ($request->offline) {
                 throw new \RuntimeException('Repository is not available in cache and --offline was requested.');
             }
+
             $this->git->run(['clone', '--bare', $identity->originalUrl, $bare]);
+            $fetched = true;
         } elseif (!$request->offline) {
-            $this->git->run(['--git-dir=' . $bare, 'fetch', '--prune', 'origin']);
+            $this->git->run(['--git-dir=' . $bare, 'fetch', '--prune', '--tags', 'origin']);
+            $fetched = true;
         }
 
-        $requestedRef = $request->requestedRef();
-        $ref = $requestedRef ?? 'HEAD';
-        $commit = $this->git->run(['--git-dir=' . $bare, 'rev-parse', $ref . '^{commit}']);
+        $gitRef = $this->resolveRequestedRef($request, $bare);
+        $commit = $this->git->run(['--git-dir=' . $bare, 'rev-parse', $gitRef->revision . '^{commit}']);
         $worktree = $this->cache->worktreeDirectory($identity, $commit);
 
         if (!is_dir($worktree)) {
@@ -48,25 +52,59 @@ final readonly class GitSourceProvider
             if (!is_dir($parent) && !mkdir($parent, 0777, true) && !is_dir($parent)) {
                 throw new \RuntimeException(sprintf('Unable to create worktree directory: %s', $parent));
             }
+
             $this->git->run(['--git-dir=' . $bare, 'worktree', 'add', '--detach', $worktree, $commit]);
         }
 
-        $root = $worktree;
-        if ($request->sourcePath !== null && $request->sourcePath !== '') {
-            $candidate = realpath($worktree . DIRECTORY_SEPARATOR . $request->sourcePath);
-            if ($candidate === false || !str_starts_with($candidate, realpath($worktree) ?: $worktree)) {
-                throw new \RuntimeException(sprintf('Invalid --source-path: %s', $request->sourcePath));
-            }
-            $root = $candidate;
-        }
+        $root = $this->resolveSourceRoot($worktree, $request->sourcePath);
+        $this->cache->saveMetadata($metadata->withResolution($gitRef->requested, $commit, $fetched));
 
         return new SourceWorkspace(
             root: $root,
             remote: true,
             repository: $identity->canonicalUrl,
-            requestedRef: $requestedRef,
+            requestedRef: $gitRef->requested,
             resolvedCommit: $commit,
             offline: $request->offline,
         );
+    }
+
+    private function resolveRequestedRef(SourceRequest $request, string $bare): GitRef
+    {
+        if ($request->branch !== null) {
+            return GitRef::branch($request->branch);
+        }
+
+        if ($request->ref !== null) {
+            return GitRef::explicit($request->ref);
+        }
+
+        $symbolic = $this->git->run(['--git-dir=' . $bare, 'symbolic-ref', 'refs/remotes/origin/HEAD']);
+        $prefix = 'refs/remotes/origin/';
+        if (!str_starts_with($symbolic, $prefix)) {
+            throw new \RuntimeException(sprintf('Unable to resolve remote default branch from %s.', $symbolic));
+        }
+
+        return GitRef::defaultBranch(substr($symbolic, strlen($prefix)));
+    }
+
+    private function resolveSourceRoot(string $worktree, ?string $sourcePath): string
+    {
+        if ($sourcePath === null || $sourcePath === '') {
+            return $worktree;
+        }
+
+        $worktreeRoot = realpath($worktree);
+        $candidate = realpath($worktree . DIRECTORY_SEPARATOR . $sourcePath);
+        if ($worktreeRoot === false || $candidate === false) {
+            throw new \RuntimeException(sprintf('Invalid --source-path: %s', $sourcePath));
+        }
+
+        $rootPrefix = rtrim($worktreeRoot, '\\/') . DIRECTORY_SEPARATOR;
+        if ($candidate !== $worktreeRoot && !str_starts_with($candidate . DIRECTORY_SEPARATOR, $rootPrefix)) {
+            throw new \RuntimeException(sprintf('Invalid --source-path outside repository: %s', $sourcePath));
+        }
+
+        return $candidate;
     }
 }
