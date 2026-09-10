@@ -3,7 +3,7 @@
 /**
  * @file BuildCommand.php
  * @path src/Command/BuildCommand.php
- * @version 1.3.0
+ * @version 1.4.0
  * @date 2026-09-10
  * @author Walter Torres
  * @copyright Copyright 2026, Walter Torres.
@@ -20,6 +20,7 @@ namespace SourceSlate\Command;
 
 use SourceSlate\Build\BuildManifest;
 use SourceSlate\Build\BuildStagingArea;
+use SourceSlate\Build\OutputGuard;
 use SourceSlate\Configuration\ConfigurationLoader;
 use SourceSlate\Parser\PhpSourceParser;
 use SourceSlate\Renderer\HtmlRenderer;
@@ -44,6 +45,7 @@ final class BuildCommand extends Command
             ->addArgument('project', InputArgument::OPTIONAL, 'Local project root or remote Git repository.', '.')
             ->addOption('config', null, InputOption::VALUE_REQUIRED, 'Explicit SourceSlate YAML configuration file.')
             ->addOption('output', null, InputOption::VALUE_REQUIRED, 'Output directory. Required for remote Git sources.')
+            ->addOption('force-output', null, InputOption::VALUE_NONE, 'Allow replacement of a non-empty output directory that is not already SourceSlate-managed.')
             ->addOption('branch', null, InputOption::VALUE_REQUIRED, 'Remote Git branch to document.')
             ->addOption('ref', null, InputOption::VALUE_REQUIRED, 'Remote Git tag, branch ref, or commit SHA to document.')
             ->addOption('source-path', null, InputOption::VALUE_REQUIRED, 'Subdirectory within the resolved source workspace.')
@@ -99,6 +101,8 @@ final class BuildCommand extends Command
             if ($workspace->remote) {
                 $this->assertRemoteOutputSafety($outputDirectory, $root, $cache->root());
             }
+
+            (new OutputGuard())->assertWritable($outputDirectory, (bool) $input->getOption('force-output'));
 
             $staging = new BuildStagingArea($outputDirectory);
             (new HtmlRenderer())->render($project, $staging->path());
