@@ -3,7 +3,7 @@
 /**
  * @file BuildCommand.php
  * @path src/Command/BuildCommand.php
- * @version 1.2.0
+ * @version 1.3.0
  * @date 2026-09-10
  * @author Walter Torres
  * @copyright Copyright 2026, Walter Torres.
@@ -19,6 +19,7 @@ declare(strict_types=1);
 namespace SourceSlate\Command;
 
 use SourceSlate\Build\BuildManifest;
+use SourceSlate\Build\BuildStagingArea;
 use SourceSlate\Configuration\ConfigurationLoader;
 use SourceSlate\Parser\PhpSourceParser;
 use SourceSlate\Renderer\HtmlRenderer;
@@ -55,6 +56,8 @@ final class BuildCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $staging = null;
+
         try {
             $request = new SourceRequest(
                 source: (string) $input->getArgument('project'),
@@ -97,8 +100,11 @@ final class BuildCommand extends Command
                 $this->assertRemoteOutputSafety($outputDirectory, $root, $cache->root());
             }
 
-            (new HtmlRenderer())->render($project, $outputDirectory);
-            BuildManifest::create($workspace, $outputDirectory)->write($outputDirectory);
+            $staging = new BuildStagingArea($outputDirectory);
+            (new HtmlRenderer())->render($project, $staging->path());
+            BuildManifest::create($workspace, $staging->path())->write($staging->path());
+            $staging->publish();
+            $staging = null;
 
             if ($workspace->remote) {
                 $output->writeln(sprintf('<info>Resolved %s at %s.</info>', $workspace->repository, $workspace->resolvedCommit));
@@ -112,6 +118,10 @@ final class BuildCommand extends Command
 
             return Command::SUCCESS;
         } catch (\Throwable $exception) {
+            if ($staging instanceof BuildStagingArea) {
+                $staging->discard();
+            }
+
             $output->writeln(sprintf('<error>%s</error>', $exception->getMessage()));
             return Command::FAILURE;
         }
