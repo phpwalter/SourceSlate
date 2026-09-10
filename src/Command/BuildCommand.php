@@ -3,7 +3,7 @@
 /**
  * @file BuildCommand.php
  * @path src/Command/BuildCommand.php
- * @version 1.1.0
+ * @version 1.2.0
  * @date 2026-09-10
  * @author Walter Torres
  * @copyright Copyright 2026, Walter Torres.
@@ -18,6 +18,7 @@ declare(strict_types=1);
 
 namespace SourceSlate\Command;
 
+use SourceSlate\Build\BuildManifest;
 use SourceSlate\Configuration\ConfigurationLoader;
 use SourceSlate\Parser\PhpSourceParser;
 use SourceSlate\Renderer\HtmlRenderer;
@@ -66,7 +67,8 @@ final class BuildCommand extends Command
                 recurseSubmodules: (bool) $input->getOption('recurse-submodules'),
             );
 
-            $resolver = new SourceResolver(new GitSourceProvider(new GitClient(), GitCache::default()));
+            $cache = GitCache::default();
+            $resolver = new SourceResolver(new GitSourceProvider(new GitClient(), $cache));
             $workspace = $resolver->resolve($request);
             $root = $workspace->root;
 
@@ -91,7 +93,12 @@ final class BuildCommand extends Command
                 ? $this->absoluteOutputPath($request->output)
                 : $root . DIRECTORY_SEPARATOR . $config->outputPath;
 
+            if ($workspace->remote) {
+                $this->assertRemoteOutputSafety($outputDirectory, $root, $cache->root());
+            }
+
             (new HtmlRenderer())->render($project, $outputDirectory);
+            BuildManifest::create($workspace, $outputDirectory)->write($outputDirectory);
 
             if ($workspace->remote) {
                 $output->writeln(sprintf('<info>Resolved %s at %s.</info>', $workspace->repository, $workspace->resolvedCommit));
@@ -126,5 +133,40 @@ final class BuildCommand extends Command
         }
 
         return rtrim($cwd, '\\/') . DIRECTORY_SEPARATOR . $path;
+    }
+
+    private function assertRemoteOutputSafety(string $outputDirectory, string $sourceRoot, string $cacheRoot): void
+    {
+        $normalizedOutput = $this->normalizePath($outputDirectory);
+        $normalizedSource = $this->normalizePath($sourceRoot);
+        $normalizedCache = $this->normalizePath($cacheRoot);
+
+        if ($this->isSameOrDescendant($normalizedOutput, $normalizedSource)) {
+            throw new \InvalidArgumentException('Remote --output cannot be inside the cached source workspace.');
+        }
+
+        if ($this->isSameOrDescendant($normalizedOutput, $normalizedCache)) {
+            throw new \InvalidArgumentException('Remote --output cannot be inside the SourceSlate Git cache.');
+        }
+    }
+
+    private function normalizePath(string $path): string
+    {
+        $resolved = realpath($path);
+        $value = $resolved !== false ? $resolved : $path;
+        $value = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $value);
+
+        return rtrim($value, DIRECTORY_SEPARATOR);
+    }
+
+    private function isSameOrDescendant(string $candidate, string $parent): bool
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $candidate = strtolower($candidate);
+            $parent = strtolower($parent);
+        }
+
+        return $candidate === $parent
+            || str_starts_with($candidate . DIRECTORY_SEPARATOR, $parent . DIRECTORY_SEPARATOR);
     }
 }
