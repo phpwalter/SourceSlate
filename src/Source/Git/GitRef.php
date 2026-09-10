@@ -20,7 +20,7 @@ final readonly class GitRef
             throw new \InvalidArgumentException('Git branch cannot be empty.');
         }
 
-        return new self($branch, 'refs/remotes/origin/' . $branch, 'branch');
+        return new self($branch, 'refs/heads/' . $branch, 'branch');
     }
 
     public static function explicit(string $ref): self
