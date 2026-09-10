@@ -53,9 +53,19 @@ final readonly class GitCache
         return $this->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'metadata.json';
     }
 
+    public function lock(GitRepositoryIdentity $identity): GitCacheLock
+    {
+        return new GitCacheLock($this->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'locks' . DIRECTORY_SEPARATOR . 'fetch.lock');
+    }
+
     public function worktreeDirectory(GitRepositoryIdentity $identity, string $commit): string
     {
         return $this->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'worktrees' . DIRECTORY_SEPARATOR . $commit;
+    }
+
+    public function alternateWorktreeDirectory(GitRepositoryIdentity $identity, string $commit): string
+    {
+        return $this->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'worktrees' . DIRECTORY_SEPARATOR . $commit . '-' . bin2hex(random_bytes(4));
     }
 
     public function ensureRepositoryDirectory(GitRepositoryIdentity $identity): void
