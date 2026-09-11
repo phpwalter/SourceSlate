@@ -13,6 +13,7 @@ $arguments = $_SERVER['argv'] ?? [];
 $firstArgument = $arguments[1] ?? null;
 $commands = [
     'build',
+    'doctor',
     'list',
     'help',
     'completion',
