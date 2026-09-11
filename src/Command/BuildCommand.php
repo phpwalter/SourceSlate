@@ -3,8 +3,8 @@
 /**
  * @file BuildCommand.php
  * @path src/Command/BuildCommand.php
- * @version 1.5.0
- * @date 2026-09-10
+ * @version 1.6.0
+ * @date 2026-09-11
  * @author Walter Torres
  * @copyright Copyright 2026, Walter Torres.
  * @license Proprietary
@@ -22,6 +22,8 @@ use SourceSlate\Build\BuildManifest;
 use SourceSlate\Build\BuildStagingArea;
 use SourceSlate\Build\OutputGuard;
 use SourceSlate\Configuration\ConfigurationLoader;
+use SourceSlate\Exception\OutputException;
+use SourceSlate\Exception\SourceSlateException;
 use SourceSlate\Parser\PhpSourceParser;
 use SourceSlate\Renderer\HtmlRenderer;
 use SourceSlate\Source\Git\GitCache;
@@ -86,7 +88,7 @@ final class BuildCommand extends Command
 
             if ((bool) $input->getOption('update-source')) {
                 if ($workspace->remote) {
-                    throw new \InvalidArgumentException('--update-source is not permitted for remote Git sources.');
+                    throw new SourceSlateException('SS-SRC-0010', '--update-source is not permitted for remote Git sources.', 31);
                 }
                 $output->writeln('<comment>Source-header mutation is reserved by the 1.0 contract but is not enabled in this foundation build.</comment>');
             }
@@ -123,6 +125,13 @@ final class BuildCommand extends Command
             ));
 
             return Command::SUCCESS;
+        } catch (SourceSlateException $exception) {
+            if ($staging instanceof BuildStagingArea) {
+                $staging->discard();
+            }
+
+            $output->writeln(sprintf('<error>%s</error>', $exception->formattedMessage()));
+            return $exception->exitCode;
         } catch (\Throwable $exception) {
             if ($staging instanceof BuildStagingArea) {
                 $staging->discard();
@@ -136,7 +145,7 @@ final class BuildCommand extends Command
     private function absoluteOutputPath(string $path): string
     {
         if ($path === '') {
-            throw new \InvalidArgumentException('--output cannot be empty.');
+            throw new OutputException('SS-OUT-0040', '--output cannot be empty.', 40);
         }
 
         if (preg_match('#^(?:[A-Za-z]:[\\\\/]|/)#', $path) === 1) {
@@ -145,7 +154,7 @@ final class BuildCommand extends Command
 
         $cwd = getcwd();
         if ($cwd === false) {
-            throw new \RuntimeException('Unable to resolve the current working directory.');
+            throw new OutputException('SS-OUT-0040', 'Unable to resolve the current working directory.', 40);
         }
 
         return rtrim($cwd, '\\/') . DIRECTORY_SEPARATOR . $path;
@@ -158,11 +167,11 @@ final class BuildCommand extends Command
         $normalizedCache = $this->normalizePath($cacheRoot);
 
         if ($this->isSameOrDescendant($normalizedOutput, $normalizedSource)) {
-            throw new \InvalidArgumentException('Remote --output cannot be inside the cached source workspace.');
+            throw new OutputException('SS-OUT-0041', 'Remote --output cannot be inside the cached source workspace.', 41);
         }
 
         if ($this->isSameOrDescendant($normalizedOutput, $normalizedCache)) {
-            throw new \InvalidArgumentException('Remote --output cannot be inside the SourceSlate Git cache.');
+            throw new OutputException('SS-OUT-0041', 'Remote --output cannot be inside the SourceSlate Git cache.', 41);
         }
     }
 
