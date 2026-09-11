@@ -19,6 +19,7 @@ final class CachePruneCommand extends Command
     {
         $this
             ->addOption('older-than', null, InputOption::VALUE_REQUIRED, 'Remove repositories not used within this age, such as 90d.', '90d')
+            ->addOption('max-size', null, InputOption::VALUE_REQUIRED, 'Reduce cache to at most this size, such as 10GB.')
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Report what would be removed without deleting anything.');
     }
 
@@ -27,6 +28,7 @@ final class CachePruneCommand extends Command
         try {
             $seconds = $this->parseAge((string) $input->getOption('older-than'));
             $threshold = time() - $seconds;
+            $maxSize = $input->getOption('max-size') !== null ? $this->parseSize((string) $input->getOption('max-size')) : null;
             $root = GitCache::default()->root();
             $dryRun = (bool) $input->getOption('dry-run');
 
@@ -35,40 +37,86 @@ final class CachePruneCommand extends Command
                 return Command::SUCCESS;
             }
 
-            $removed = 0;
-            foreach (array_values(array_diff(scandir($root) ?: [], ['.', '..'])) as $entry) {
-                $directory = $root . DIRECTORY_SEPARATOR . $entry;
-                $metadata = $directory . DIRECTORY_SEPARATOR . 'metadata.json';
-                if (!is_dir($directory) || !is_file($metadata)) {
-                    continue;
-                }
+            $entries = $this->entries($root);
+            $selected = [];
 
-                $data = json_decode((string) file_get_contents($metadata), true);
-                if (!is_array($data)) {
-                    continue;
+            foreach ($entries as $entry) {
+                if ($entry['last_used'] < $threshold) {
+                    $selected[$entry['directory']] = $entry;
                 }
-
-                $lastUsed = (string) ($data['state']['last_used_at'] ?? '');
-                $timestamp = $lastUsed !== '' ? strtotime($lastUsed) : false;
-                if ($timestamp === false || $timestamp >= $threshold) {
-                    continue;
-                }
-
-                $repository = (string) ($data['repository']['canonical_url'] ?? $entry);
-                $output->writeln(sprintf('%s %s', $dryRun ? 'Would prune:' : 'Pruning:', $repository));
-
-                if (!$dryRun) {
-                    $this->removeTree($directory);
-                }
-                ++$removed;
             }
 
-            $output->writeln(sprintf('<info>%d cache entr%s %s.</info>', $removed, $removed === 1 ? 'y' : 'ies', $dryRun ? 'would be pruned' : 'pruned'));
+            if ($maxSize !== null) {
+                $remaining = array_values(array_filter(
+                    $entries,
+                    static fn (array $entry): bool => !isset($selected[$entry['directory']]),
+                ));
+                $remainingSize = array_sum(array_column($remaining, 'size'));
+                usort($remaining, static fn (array $a, array $b): int => $a['last_used'] <=> $b['last_used']);
+
+                foreach ($remaining as $entry) {
+                    if ($remainingSize <= $maxSize) {
+                        break;
+                    }
+                    $selected[$entry['directory']] = $entry;
+                    $remainingSize -= $entry['size'];
+                }
+            }
+
+            uasort($selected, static fn (array $a, array $b): int => $a['last_used'] <=> $b['last_used']);
+            foreach ($selected as $entry) {
+                $output->writeln(sprintf(
+                    '%s %s (%s)',
+                    $dryRun ? 'Would prune:' : 'Pruning:',
+                    $entry['repository'],
+                    $this->formatBytes($entry['size']),
+                ));
+
+                if (!$dryRun) {
+                    $this->removeTree($entry['directory']);
+                }
+            }
+
+            $count = count($selected);
+            $output->writeln(sprintf('<info>%d cache entr%s %s.</info>', $count, $count === 1 ? 'y' : 'ies', $dryRun ? 'would be pruned' : 'pruned'));
             return Command::SUCCESS;
         } catch (CacheException $exception) {
             $output->writeln(sprintf('<error>%s</error>', $exception->formattedMessage()));
             return $exception->exitCode;
         }
+    }
+
+    /** @return list<array{directory:string,repository:string,last_used:int,size:int}> */
+    private function entries(string $root): array
+    {
+        $entries = [];
+        foreach (array_values(array_diff(scandir($root) ?: [], ['.', '..'])) as $name) {
+            $directory = $root . DIRECTORY_SEPARATOR . $name;
+            $metadata = $directory . DIRECTORY_SEPARATOR . 'metadata.json';
+            if (!is_dir($directory) || !is_file($metadata)) {
+                continue;
+            }
+
+            $data = json_decode((string) file_get_contents($metadata), true);
+            if (!is_array($data)) {
+                continue;
+            }
+
+            $lastUsedValue = (string) ($data['state']['last_used_at'] ?? '');
+            $lastUsed = $lastUsedValue !== '' ? strtotime($lastUsedValue) : false;
+            if ($lastUsed === false) {
+                continue;
+            }
+
+            $entries[] = [
+                'directory' => $directory,
+                'repository' => (string) ($data['repository']['canonical_url'] ?? $name),
+                'last_used' => $lastUsed,
+                'size' => $this->directorySize($directory),
+            ];
+        }
+
+        return $entries;
     }
 
     private function parseAge(string $value): int
@@ -83,6 +131,45 @@ final class CachePruneCommand extends Command
             'h' => 3600,
             'm' => 60,
         };
+    }
+
+    private function parseSize(string $value): int
+    {
+        if (preg_match('/^(\d+)(kb|mb|gb|tb)$/i', trim($value), $matches) !== 1) {
+            throw new CacheException('SS-CACHE-0012', 'Invalid --max-size value. Use values such as 500MB or 10GB.', 24);
+        }
+
+        $amount = (int) $matches[1];
+        return $amount * match (strtolower($matches[2])) {
+            'kb' => 1024,
+            'mb' => 1024 ** 2,
+            'gb' => 1024 ** 3,
+            'tb' => 1024 ** 4,
+        };
+    }
+
+    private function directorySize(string $path): int
+    {
+        $size = 0;
+        $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS));
+        foreach ($iterator as $item) {
+            if ($item->isFile()) {
+                $size += $item->getSize();
+            }
+        }
+        return $size;
+    }
+
+    private function formatBytes(int $bytes): string
+    {
+        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        $value = (float) $bytes;
+        $index = 0;
+        while ($value >= 1024 && $index < count($units) - 1) {
+            $value /= 1024;
+            ++$index;
+        }
+        return sprintf('%.1f%s', $value, $units[$index]);
     }
 
     private function removeTree(string $path): void
