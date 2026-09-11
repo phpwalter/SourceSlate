@@ -14,6 +14,8 @@ final readonly class SourceWorkspace
         public ?string $resolvedCommit = null,
         public bool $offline = false,
         public ?string $cacheStatus = null,
+        public ?string $gitState = null,
+        public ?string $branch = null,
     ) {
     }
 }
