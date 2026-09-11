@@ -3,7 +3,7 @@
 /**
  * @file ConfigurationLoader.php
  * @path src/Configuration/ConfigurationLoader.php
- * @version 1.2.0
+ * @version 1.3.0
  * @date 2026-09-11
  * @author Walter Torres
  * @copyright Copyright 2026, Walter Torres.
@@ -33,7 +33,7 @@ final class ConfigurationLoader
             throw new InvalidArgumentException(sprintf('Project root does not exist: %s', $projectRoot));
         }
 
-        $repoRoot = $repositoryRoot !== null ? realpath($repositoryRoot) : $root;
+        $repoRoot = $repositoryRoot !== null ? realpath($repositoryRoot) : $this->discoverRepositoryRoot($root);
         if ($repoRoot === false || !is_dir($repoRoot)) {
             throw new InvalidArgumentException(sprintf('Repository root does not exist: %s', (string) $repositoryRoot));
         }
@@ -94,6 +94,23 @@ final class ConfigurationLoader
             outputPath: (string) ($output['path'] ?? 'docs'),
             updateSource: (bool) ($headers['update'] ?? false),
         );
+    }
+
+    private function discoverRepositoryRoot(string $root): string
+    {
+        $candidate = $root;
+        while (true) {
+            if (file_exists($candidate . DIRECTORY_SEPARATOR . '.git')) {
+                return $candidate;
+            }
+
+            $parent = dirname($candidate);
+            if ($parent === $candidate) {
+                return $root;
+            }
+
+            $candidate = $parent;
+        }
     }
 
     private function parseRepositoryFile(string $path): array
