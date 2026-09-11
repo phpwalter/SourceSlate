@@ -3,7 +3,7 @@
 /**
  * @file Application.php
  * @path src/Application.php
- * @version 1.2.0
+ * @version 1.3.0
  * @date 2026-09-11
  * @author Walter Torres
  * @copyright Copyright 2026, Walter Torres.
@@ -22,6 +22,8 @@ use SourceSlate\Command\BuildCommand;
 use SourceSlate\Command\Cache\CacheClearCommand;
 use SourceSlate\Command\Cache\CacheInfoCommand;
 use SourceSlate\Command\Cache\CacheListCommand;
+use SourceSlate\Command\Cache\CachePruneCommand;
+use SourceSlate\Command\Cache\CacheRepairCommand;
 use SourceSlate\Command\Cache\CacheVerifyCommand;
 use Symfony\Component\Console\Application as SymfonyApplication;
 
@@ -35,6 +37,8 @@ final class Application extends SymfonyApplication
         $this->add(new CacheListCommand());
         $this->add(new CacheInfoCommand());
         $this->add(new CacheVerifyCommand());
+        $this->add(new CacheRepairCommand());
+        $this->add(new CachePruneCommand());
         $this->add(new CacheClearCommand());
         $this->setDefaultCommand('build', false);
     }
