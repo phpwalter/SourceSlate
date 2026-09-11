@@ -18,6 +18,8 @@ final readonly class BuildManifest
         public ?string $resolvedCommit,
         public bool $offline,
         public ?string $cacheStatus,
+        public ?string $gitState,
+        public ?string $branch,
         public array $files,
     ) {
     }
@@ -34,6 +36,8 @@ final readonly class BuildManifest
             resolvedCommit: $workspace->resolvedCommit,
             offline: $workspace->offline,
             cacheStatus: $workspace->cacheStatus,
+            gitState: $workspace->gitState,
+            branch: $workspace->branch,
             files: self::hashGeneratedFiles($outputDirectory),
         );
     }
@@ -49,8 +53,10 @@ final readonly class BuildManifest
                 'type' => $this->sourceType,
                 'root' => $this->sourceRoot,
                 'repository' => $this->repository,
+                'branch' => $this->branch,
                 'requested_ref' => $this->requestedRef,
                 'resolved_commit' => $this->resolvedCommit,
+                'git_state' => $this->gitState,
                 'offline' => $this->offline,
                 'cache_status' => $this->cacheStatus,
             ],
