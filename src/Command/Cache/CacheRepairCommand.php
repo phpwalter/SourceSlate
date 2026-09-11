@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace SourceSlate\Command\Cache;
 
 use SourceSlate\Exception\CacheException;
+use SourceSlate\Exception\SourceSlateException;
 use SourceSlate\Source\Git\GitCache;
+use SourceSlate\Source\Git\GitCacheMetadata;
 use SourceSlate\Source\Git\GitClient;
 use SourceSlate\Source\Git\GitRepositoryIdentity;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -42,11 +44,11 @@ final class CacheRepairCommand extends Command
 
             $cache->ensureRepositoryDirectory($identity);
             (new GitClient())->run(['clone', '--bare', $identity->originalUrl, $cache->bareRepository($identity)]);
-            $cache->saveMetadata(\SourceSlate\Source\Git\GitCacheMetadata::create($identity));
+            $cache->saveMetadata(GitCacheMetadata::create($identity));
 
             $output->writeln(sprintf('<info>Rebuilt cache for %s.</info>', $identity->canonicalUrl));
             return Command::SUCCESS;
-        } catch (CacheException $exception) {
+        } catch (SourceSlateException $exception) {
             $output->writeln(sprintf('<error>%s</error>', $exception->formattedMessage()));
             return $exception->exitCode;
         }
