@@ -3,7 +3,7 @@
 /**
  * @file BuildCommand.php
  * @path src/Command/BuildCommand.php
- * @version 1.8.0
+ * @version 1.9.0
  * @date 2026-09-11
  * @author Walter Torres
  * @copyright Copyright 2026, Walter Torres.
@@ -20,10 +20,12 @@ namespace SourceSlate\Command;
 
 use SourceSlate\Build\BuildManifest;
 use SourceSlate\Build\BuildStagingArea;
+use SourceSlate\Build\DocumentationComparator;
 use SourceSlate\Build\OutputGuard;
 use SourceSlate\Configuration\ConfigurationLoader;
 use SourceSlate\Exception\OutputException;
 use SourceSlate\Exception\SourceSlateException;
+use SourceSlate\Exception\ValidationException;
 use SourceSlate\Parser\PhpSourceParser;
 use SourceSlate\Renderer\HtmlRenderer;
 use SourceSlate\Source\Git\GitCache;
@@ -51,7 +53,9 @@ final class BuildCommand extends Command
             ->addOption('branch', null, InputOption::VALUE_REQUIRED, 'Remote Git branch to document.')
             ->addOption('tag', null, InputOption::VALUE_REQUIRED, 'Remote Git tag to document.')
             ->addOption('ref', null, InputOption::VALUE_REQUIRED, 'Remote Git branch ref, tag ref, or commit SHA to document.')
+            ->addOption('source-type', null, InputOption::VALUE_REQUIRED, 'Force source interpretation: local or git.')
             ->addOption('source-path', null, InputOption::VALUE_REQUIRED, 'Subdirectory within the resolved source workspace.')
+            ->addOption('git-timeout', null, InputOption::VALUE_REQUIRED, 'Git command timeout in seconds.', '60')
             ->addOption('refresh', null, InputOption::VALUE_NONE, 'Force remote revalidation when supported.')
             ->addOption('offline', null, InputOption::VALUE_NONE, 'Use only the persistent Git cache; never contact the remote.')
             ->addOption('recurse-submodules', null, InputOption::VALUE_NONE, 'Fetch submodules for the resolved worktree.')
@@ -59,7 +63,7 @@ final class BuildCommand extends Command
             ->addOption('json', null, InputOption::VALUE_NONE, 'Emit machine-readable JSON output.')
             ->addOption('ci', null, InputOption::VALUE_NONE, 'Use deterministic non-interactive CI behavior.')
             ->addOption('update-source', null, InputOption::VALUE_NONE, 'Update source headers with @sourceslate links when supported.')
-            ->addOption('check', null, InputOption::VALUE_NONE, 'Run documentation consistency checks when supported.');
+            ->addOption('check', null, InputOption::VALUE_NONE, 'Render in staging and fail if published documentation differs.');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -68,6 +72,7 @@ final class BuildCommand extends Command
         $json = (bool) $input->getOption('json');
 
         try {
+            $gitTimeout = (int) $input->getOption('git-timeout');
             $request = new SourceRequest(
                 source: (string) $input->getArgument('project'),
                 output: $input->getOption('output') !== null ? (string) $input->getOption('output') : null,
@@ -78,10 +83,13 @@ final class BuildCommand extends Command
                 refresh: (bool) $input->getOption('refresh'),
                 offline: (bool) $input->getOption('offline'),
                 recurseSubmodules: (bool) $input->getOption('recurse-submodules'),
+                sourceType: $input->getOption('source-type') !== null ? (string) $input->getOption('source-type') : null,
+                gitTimeout: $gitTimeout,
             );
 
             $cache = GitCache::default();
-            $resolver = new SourceResolver(new GitSourceProvider(new GitClient(), $cache));
+            $git = new GitClient($request->gitTimeout);
+            $resolver = new SourceResolver(new GitSourceProvider($git, $cache));
             $workspace = $resolver->resolve($request);
             $root = $workspace->root;
 
@@ -97,10 +105,6 @@ final class BuildCommand extends Command
                 }
             }
 
-            if ((bool) $input->getOption('check') && !$json) {
-                $output->writeln('<comment>Validation/check mode is reserved for the validation subsystem planned after the core generator.</comment>');
-            }
-
             $outputDirectory = $request->output !== null
                 ? $this->absoluteOutputPath($request->output)
                 : $root . DIRECTORY_SEPARATOR . $config->outputPath;
@@ -110,47 +114,43 @@ final class BuildCommand extends Command
             }
 
             if ((bool) $input->getOption('dry-run')) {
-                $plan = [
-                    'status' => 'success',
-                    'mode' => 'dry-run',
-                    'source' => [
-                        'type' => $workspace->remote ? 'git' : 'local',
-                        'root' => $workspace->root,
-                        'repository' => $workspace->repository,
-                        'branch' => $workspace->branch,
-                        'requested_ref' => $workspace->requestedRef,
-                        'resolved_commit' => $workspace->resolvedCommit,
-                        'git_state' => $workspace->gitState,
-                        'cache_status' => $workspace->cacheStatus,
-                        'offline' => $workspace->offline,
-                    ],
-                    'configuration' => [
-                        'path' => $configPath,
-                        'project_name' => $config->projectName,
-                        'source_paths' => $config->sourcePaths,
-                        'exclude_paths' => $config->excludePaths,
-                    ],
-                    'output' => [
-                        'path' => $outputDirectory,
-                    ],
-                ];
+                $this->emitDryRun($output, $json, $workspace, $configPath, $config, $outputDirectory);
+                return Command::SUCCESS;
+            }
+
+            $project = (new PhpSourceParser())->parse($root, $config);
+
+            if ((bool) $input->getOption('check')) {
+                $staging = new BuildStagingArea($outputDirectory);
+                (new HtmlRenderer())->render($project, $staging->path());
+                $comparison = (new DocumentationComparator())->compare($staging->path(), $outputDirectory);
+                $staging->discard();
+                $staging = null;
+
+                if (!$comparison['matches']) {
+                    if ($json) {
+                        $this->writeJson($output, [
+                            'status' => 'error',
+                            'code' => 'SS-DOC-0050',
+                            'message' => 'Published documentation is stale.',
+                            'exit_code' => 50,
+                            'differences' => $comparison,
+                        ]);
+                        return 50;
+                    }
+
+                    throw new ValidationException('SS-DOC-0050', sprintf(
+                        'Published documentation is stale. Missing: %d; unexpected: %d; changed: %d.',
+                        count($comparison['missing']),
+                        count($comparison['unexpected']),
+                        count($comparison['changed']),
+                    ), 50);
+                }
 
                 if ($json) {
-                    $this->writeJson($output, $plan);
+                    $this->writeJson($output, ['status' => 'success', 'mode' => 'check', 'documentation' => ['up_to_date' => true]]);
                 } else {
-                    $output->writeln('<info>SourceSlate dry run</info>');
-                    $output->writeln(sprintf('Source: %s', $workspace->root));
-                    if ($workspace->repository !== null) {
-                        $output->writeln(sprintf('Repository: %s', $workspace->repository));
-                    }
-                    if ($workspace->resolvedCommit !== null) {
-                        $output->writeln(sprintf('Commit: %s', $workspace->resolvedCommit));
-                    }
-                    if ($workspace->cacheStatus !== null) {
-                        $output->writeln(sprintf('Cache: %s', $workspace->cacheStatus));
-                    }
-                    $output->writeln(sprintf('Project: %s', $config->projectName));
-                    $output->writeln(sprintf('Output: %s', $outputDirectory));
+                    $output->writeln('<info>Documentation is up to date.</info>');
                 }
 
                 return Command::SUCCESS;
@@ -158,7 +158,6 @@ final class BuildCommand extends Command
 
             (new OutputGuard())->assertWritable($outputDirectory, (bool) $input->getOption('force-output'));
 
-            $project = (new PhpSourceParser())->parse($root, $config);
             $staging = new BuildStagingArea($outputDirectory);
             (new HtmlRenderer())->render($project, $staging->path());
             BuildManifest::create($workspace, $staging->path())->write($staging->path());
@@ -236,6 +235,51 @@ final class BuildCommand extends Command
 
             return Command::FAILURE;
         }
+    }
+
+    private function emitDryRun(OutputInterface $output, bool $json, object $workspace, ?string $configPath, object $config, string $outputDirectory): void
+    {
+        $plan = [
+            'status' => 'success',
+            'mode' => 'dry-run',
+            'source' => [
+                'type' => $workspace->remote ? 'git' : 'local',
+                'root' => $workspace->root,
+                'repository' => $workspace->repository,
+                'branch' => $workspace->branch,
+                'requested_ref' => $workspace->requestedRef,
+                'resolved_commit' => $workspace->resolvedCommit,
+                'git_state' => $workspace->gitState,
+                'cache_status' => $workspace->cacheStatus,
+                'offline' => $workspace->offline,
+            ],
+            'configuration' => [
+                'path' => $configPath,
+                'project_name' => $config->projectName,
+                'source_paths' => $config->sourcePaths,
+                'exclude_paths' => $config->excludePaths,
+            ],
+            'output' => ['path' => $outputDirectory],
+        ];
+
+        if ($json) {
+            $this->writeJson($output, $plan);
+            return;
+        }
+
+        $output->writeln('<info>SourceSlate dry run</info>');
+        $output->writeln(sprintf('Source: %s', $workspace->root));
+        if ($workspace->repository !== null) {
+            $output->writeln(sprintf('Repository: %s', $workspace->repository));
+        }
+        if ($workspace->resolvedCommit !== null) {
+            $output->writeln(sprintf('Commit: %s', $workspace->resolvedCommit));
+        }
+        if ($workspace->cacheStatus !== null) {
+            $output->writeln(sprintf('Cache: %s', $workspace->cacheStatus));
+        }
+        $output->writeln(sprintf('Project: %s', $config->projectName));
+        $output->writeln(sprintf('Output: %s', $outputDirectory));
     }
 
     private function writeJson(OutputInterface $output, array $data): void
