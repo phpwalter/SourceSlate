@@ -37,6 +37,7 @@ final readonly class GitSourceProvider
             $bare = $this->cache->bareRepository($identity);
             $cacheStatus = 'miss';
             $beforeCommit = null;
+            $gitRef = null;
 
             if (!is_dir($bare)) {
                 if ($request->offline) {
@@ -45,21 +46,35 @@ final readonly class GitSourceProvider
 
                 $this->git->run(['clone', '--bare', $identity->originalUrl, $bare]);
             } else {
-                $gitRefBeforeFetch = $this->resolveRequestedRef($request, $bare);
-                $beforeCommit = $this->tryResolveCommit($bare, $gitRefBeforeFetch);
+                $gitRef = $this->resolveRequestedRef($request, $bare);
+                $beforeCommit = $this->tryResolveCommit($bare, $gitRef);
 
                 if ($request->offline) {
                     $cacheStatus = 'offline';
                 } else {
-                    $this->git->run(['--git-dir=' . $bare, 'fetch', '--prune', '--tags', 'origin']);
-                    $cacheStatus = $request->refresh ? 'refreshed' : 'hit';
+                    try {
+                        $this->git->run(['--git-dir=' . $bare, 'fetch', '--prune', '--tags', 'origin']);
+                        $cacheStatus = $request->refresh ? 'refreshed' : 'hit';
+                    } catch (GitException $exception) {
+                        if ($exception->exitCode === 22) {
+                            throw $exception;
+                        }
+
+                        if ($beforeCommit === null) {
+                            throw $exception;
+                        }
+
+                        $cacheStatus = 'cached-unverified';
+                    }
                 }
             }
 
-            $gitRef = $this->resolveRequestedRef($request, $bare);
-            $commit = $this->git->run(['--git-dir=' . $bare, 'rev-parse', $gitRef->revision . '^{commit}']);
+            $gitRef ??= $this->resolveRequestedRef($request, $bare);
+            $commit = $cacheStatus === 'cached-unverified' && $beforeCommit !== null
+                ? $beforeCommit
+                : $this->git->run(['--git-dir=' . $bare, 'rev-parse', $gitRef->revision . '^{commit}']);
 
-            if (!$request->offline && $beforeCommit !== null && $beforeCommit !== $commit) {
+            if (!$request->offline && $cacheStatus !== 'cached-unverified' && $beforeCommit !== null && $beforeCommit !== $commit) {
                 $cacheStatus = 'updated';
             }
 
@@ -70,7 +85,7 @@ final readonly class GitSourceProvider
             }
 
             $root = $this->resolveSourceRoot($worktree, $request->sourcePath);
-            $this->cache->saveMetadata($metadata->withResolution($gitRef->requested, $commit, !$request->offline));
+            $this->cache->saveMetadata($metadata->withResolution($gitRef->requested, $commit, $cacheStatus !== 'offline' && $cacheStatus !== 'cached-unverified'));
 
             return new SourceWorkspace(
                 root: $root,
@@ -78,7 +93,7 @@ final readonly class GitSourceProvider
                 repository: $identity->canonicalUrl,
                 requestedRef: $gitRef->requested,
                 resolvedCommit: $commit,
-                offline: $request->offline,
+                offline: $request->offline || $cacheStatus === 'cached-unverified',
                 cacheStatus: $cacheStatus,
             );
         } finally {
@@ -97,38 +112,7 @@ final readonly class GitSourceProvider
         }
 
         if ($request->ref !== null) {
-            $ref = trim($request->ref);
-            if ($ref === '') {
-                throw new GitException('SS-GIT-0023', 'Git ref cannot be empty.', 23);
-            }
-
-            if (str_starts_with($ref, 'refs/') || preg_match('/^[0-9a-f]{4,40}$/i', $ref) === 1) {
-                return GitRef::explicit($ref);
-            }
-
-            $branchRevision = 'refs/heads/' . $ref;
-            $tagRevision = 'refs/tags/' . $ref;
-            $branchExists = $this->refExists($bare, $branchRevision);
-            $tagExists = $this->refExists($bare, $tagRevision);
-
-            if ($branchExists && $tagExists) {
-                throw new GitException('SS-GIT-0108', sprintf(
-                    'Ref "%s" is ambiguous; both %s and %s exist. Use --branch or --tag.',
-                    $ref,
-                    $branchRevision,
-                    $tagRevision,
-                ), 23);
-            }
-
-            if ($branchExists) {
-                return GitRef::resolved($ref, $branchRevision, 'branch');
-            }
-
-            if ($tagExists) {
-                return GitRef::resolved($ref, $tagRevision, 'tag');
-            }
-
-            return GitRef::explicit($ref);
+            return $this->resolveExplicitRef($request->ref, $bare);
         }
 
         $symbolic = $this->git->run(['--git-dir=' . $bare, 'symbolic-ref', 'HEAD']);
@@ -140,20 +124,48 @@ final readonly class GitSourceProvider
         return GitRef::defaultBranch(substr($symbolic, strlen($prefix)));
     }
 
-    private function refExists(string $bare, string $revision): bool
+    private function resolveExplicitRef(string $ref, string $bare): GitRef
     {
-        try {
-            $this->git->run(['--git-dir=' . $bare, 'show-ref', '--verify', '--quiet', $revision]);
-            return true;
-        } catch (GitException) {
-            return false;
+        $trimmed = trim($ref);
+        if ($trimmed === '') {
+            throw new GitException('SS-GIT-0023', 'Git ref cannot be empty.', 23);
         }
+
+        if (str_starts_with($trimmed, 'refs/') || preg_match('/^[0-9a-f]{7,40}$/i', $trimmed) === 1) {
+            return GitRef::explicit($trimmed);
+        }
+
+        $branch = $this->tryResolveRevision($bare, 'refs/heads/' . $trimmed);
+        $tag = $this->tryResolveRevision($bare, 'refs/tags/' . $trimmed);
+
+        if ($branch !== null && $tag !== null) {
+            throw new GitException(
+                'SS-GIT-0108',
+                sprintf('Ref "%s" is ambiguous; both refs/heads/%s and refs/tags/%s exist. Use --branch or --tag.', $trimmed, $trimmed, $trimmed),
+                23,
+            );
+        }
+
+        if ($branch !== null) {
+            return GitRef::branch($trimmed);
+        }
+
+        if ($tag !== null) {
+            return GitRef::tag($trimmed);
+        }
+
+        return GitRef::explicit($trimmed);
     }
 
     private function tryResolveCommit(string $bare, GitRef $gitRef): ?string
     {
+        return $this->tryResolveRevision($bare, $gitRef->revision . '^{commit}');
+    }
+
+    private function tryResolveRevision(string $bare, string $revision): ?string
+    {
         try {
-            return $this->git->run(['--git-dir=' . $bare, 'rev-parse', $gitRef->revision . '^{commit}']);
+            return $this->git->run(['--git-dir=' . $bare, 'rev-parse', '--verify', $revision]);
         } catch (GitException) {
             return null;
         }
