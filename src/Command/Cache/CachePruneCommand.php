@@ -41,7 +41,7 @@ final class CachePruneCommand extends Command
             $selected = [];
 
             foreach ($entries as $entry) {
-                if ($entry['last_used'] < $threshold) {
+                if (!$entry['active'] && $entry['last_used'] < $threshold) {
                     $selected[$entry['directory']] = $entry;
                 }
             }
@@ -57,6 +57,9 @@ final class CachePruneCommand extends Command
                 foreach ($remaining as $entry) {
                     if ($remainingSize <= $maxSize) {
                         break;
+                    }
+                    if ($entry['active']) {
+                        continue;
                     }
                     $selected[$entry['directory']] = $entry;
                     $remainingSize -= $entry['size'];
@@ -77,6 +80,12 @@ final class CachePruneCommand extends Command
                 }
             }
 
+            foreach ($entries as $entry) {
+                if ($entry['active']) {
+                    $output->writeln(sprintf('<comment>Skipping active cache entry: %s</comment>', $entry['repository']));
+                }
+            }
+
             $count = count($selected);
             $output->writeln(sprintf('<info>%d cache entr%s %s.</info>', $count, $count === 1 ? 'y' : 'ies', $dryRun ? 'would be pruned' : 'pruned'));
             return Command::SUCCESS;
@@ -86,7 +95,7 @@ final class CachePruneCommand extends Command
         }
     }
 
-    /** @return list<array{directory:string,repository:string,last_used:int,size:int}> */
+    /** @return list<array{directory:string,repository:string,last_used:int,size:int,active:bool}> */
     private function entries(string $root): array
     {
         $entries = [];
@@ -113,10 +122,33 @@ final class CachePruneCommand extends Command
                 'repository' => (string) ($data['repository']['canonical_url'] ?? $name),
                 'last_used' => $lastUsed,
                 'size' => $this->directorySize($directory),
+                'active' => $this->isActive($directory),
             ];
         }
 
         return $entries;
+    }
+
+    private function isActive(string $directory): bool
+    {
+        $path = $directory . DIRECTORY_SEPARATOR . 'locks' . DIRECTORY_SEPARATOR . 'fetch.lock';
+        $lockDirectory = dirname($path);
+        if (!is_dir($lockDirectory)) {
+            return false;
+        }
+
+        $handle = fopen($path, 'c+');
+        if ($handle === false) {
+            return true;
+        }
+
+        $acquired = flock($handle, LOCK_EX | LOCK_NB);
+        if ($acquired) {
+            flock($handle, LOCK_UN);
+        }
+        fclose($handle);
+
+        return !$acquired;
     }
 
     private function parseAge(string $value): int
