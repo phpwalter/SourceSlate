@@ -51,6 +51,43 @@ final class GitSourceProviderIntegrationTest extends TestCase
         }
     }
 
+    public function testDirtyCachedWorktreeIsNotReused(): void
+    {
+        $root = $this->temporaryDirectory();
+        $remote = $this->createRemoteRepository($root);
+        $cache = new GitCache($root . DIRECTORY_SEPARATOR . 'cache');
+        $provider = new GitSourceProvider(new GitClient(30), $cache);
+        $source = $this->fileUrl($remote);
+
+        try {
+            $first = $provider->resolve(new SourceRequest(
+                source: $source,
+                output: $root . DIRECTORY_SEPARATOR . 'docs-first',
+                branch: 'main',
+            ));
+
+            $dirtyFile = $first->root . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR . 'Example.php';
+            file_put_contents($dirtyFile, "<?php\n\nfinal class Example { public const VERSION = 999; }\n");
+
+            $second = $provider->resolve(new SourceRequest(
+                source: $source,
+                output: $root . DIRECTORY_SEPARATOR . 'docs-second',
+                branch: 'main',
+                offline: true,
+            ));
+
+            self::assertSame($first->resolvedCommit, $second->resolvedCommit);
+            self::assertNotSame($first->root, $second->root);
+            self::assertStringContainsString(
+                'VERSION = 1',
+                (string) file_get_contents($second->root . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR . 'Example.php'),
+            );
+            self::assertStringContainsString('VERSION = 999', (string) file_get_contents($dirtyFile));
+        } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
     public function testOfflineCacheMissFailsDeterministically(): void
     {
         $root = $this->temporaryDirectory();
