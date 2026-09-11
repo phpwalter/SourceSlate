@@ -11,7 +11,16 @@ require dirname(__DIR__) . '/vendor/autoload.php';
 /** @var list<string> $arguments */
 $arguments = $_SERVER['argv'] ?? [];
 $firstArgument = $arguments[1] ?? null;
-$commands = ['build', 'list', 'help', 'completion', 'cache:list', 'cache:info'];
+$commands = [
+    'build',
+    'list',
+    'help',
+    'completion',
+    'cache:list',
+    'cache:info',
+    'cache:verify',
+    'cache:clear',
+];
 
 if (
     $firstArgument !== null
