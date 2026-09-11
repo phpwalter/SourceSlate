@@ -8,6 +8,13 @@ use SourceSlate\Exception\GitException;
 
 final class GitClient
 {
+    public function __construct(private readonly int $timeout = 60)
+    {
+        if ($timeout < 1) {
+            throw new \InvalidArgumentException('Git timeout must be greater than zero.');
+        }
+    }
+
     public function run(array $arguments, ?string $cwd = null): string
     {
         $command = array_merge(['git'], $arguments);
@@ -22,20 +29,46 @@ final class GitClient
             throw new GitException('SS-GIT-0020', 'Unable to start git process.', 20);
         }
 
-        $stdout = stream_get_contents($pipes[1]);
-        $stderr = stream_get_contents($pipes[2]);
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+        $stdout = '';
+        $stderr = '';
+        $startedAt = microtime(true);
+
+        while (true) {
+            $stdout .= (string) stream_get_contents($pipes[1]);
+            $stderr .= (string) stream_get_contents($pipes[2]);
+
+            $status = proc_get_status($process);
+            if (!$status['running']) {
+                break;
+            }
+
+            if ((microtime(true) - $startedAt) >= $this->timeout) {
+                proc_terminate($process);
+                fclose($pipes[1]);
+                fclose($pipes[2]);
+                proc_close($process);
+                throw new GitException('SS-GIT-0026', sprintf('Git command exceeded timeout of %d second(s).', $this->timeout), 25);
+            }
+
+            usleep(10000);
+        }
+
+        $stdout .= (string) stream_get_contents($pipes[1]);
+        $stderr .= (string) stream_get_contents($pipes[2]);
         fclose($pipes[1]);
         fclose($pipes[2]);
         $exitCode = proc_close($process);
 
         if ($exitCode !== 0) {
-            $message = trim((string) $stderr);
+            $message = trim($stderr);
             [$code, $mappedExitCode] = $this->classifyFailure($message);
 
             throw new GitException($code, $message !== '' ? $message : 'Git command failed.', $mappedExitCode);
         }
 
-        return trim((string) $stdout);
+        return trim($stdout);
     }
 
     public function isAvailable(): bool
