@@ -17,6 +17,7 @@ final readonly class BuildManifest
         public ?string $requestedRef,
         public ?string $resolvedCommit,
         public bool $offline,
+        public ?string $cacheStatus,
         public array $files,
     ) {
     }
@@ -32,6 +33,7 @@ final readonly class BuildManifest
             requestedRef: $workspace->requestedRef,
             resolvedCommit: $workspace->resolvedCommit,
             offline: $workspace->offline,
+            cacheStatus: $workspace->cacheStatus,
             files: self::hashGeneratedFiles($outputDirectory),
         );
     }
@@ -50,6 +52,7 @@ final readonly class BuildManifest
                 'requested_ref' => $this->requestedRef,
                 'resolved_commit' => $this->resolvedCommit,
                 'offline' => $this->offline,
+                'cache_status' => $this->cacheStatus,
             ],
             'files' => $this->files,
         ];
