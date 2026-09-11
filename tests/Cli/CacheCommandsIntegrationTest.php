@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 use SourceSlate\Application;
 use SourceSlate\Source\Git\GitCache;
 use SourceSlate\Source\Git\GitCacheMetadata;
+use SourceSlate\Source\Git\GitClient;
 use SourceSlate\Source\Git\GitRepositoryIdentity;
 use Symfony\Component\Console\Tester\ApplicationTester;
 
@@ -38,7 +39,6 @@ final class CacheCommandsIntegrationTest extends TestCase
     public function testCacheListReportsEmptyCache(): void
     {
         [$status, $display] = $this->run(['command' => 'cache:list']);
-
         self::assertSame(0, $status);
         self::assertStringContainsString('No cached repositories.', $display);
     }
@@ -62,10 +62,7 @@ final class CacheCommandsIntegrationTest extends TestCase
         self::assertStringContainsString('refs/heads/main', $listDisplay);
         self::assertStringContainsString(str_repeat('a', 12), $listDisplay);
 
-        [$infoStatus, $infoDisplay] = $this->run([
-            'command' => 'cache:info',
-            'repository' => 'https://github.com/acme/example.git',
-        ]);
+        [$infoStatus, $infoDisplay] = $this->run(['command' => 'cache:info', 'repository' => 'https://github.com/acme/example.git']);
         self::assertSame(0, $infoStatus);
         $decoded = json_decode($infoDisplay, true, flags: JSON_THROW_ON_ERROR);
         self::assertSame('github.com/acme/example', $decoded['repository']['canonical_url']);
@@ -74,11 +71,7 @@ final class CacheCommandsIntegrationTest extends TestCase
 
     public function testCacheInfoReturnsStableDiagnosticForMissingRepository(): void
     {
-        [$status, $display] = $this->run([
-            'command' => 'cache:info',
-            'repository' => 'https://github.com/acme/missing.git',
-        ]);
-
+        [$status, $display] = $this->run(['command' => 'cache:info', 'repository' => 'https://github.com/acme/missing.git']);
         self::assertSame(24, $status);
         self::assertStringContainsString('SS-CACHE-0404', $display);
     }
@@ -86,7 +79,6 @@ final class CacheCommandsIntegrationTest extends TestCase
     public function testCacheClearRequiresExplicitConfirmation(): void
     {
         [$status, $display] = $this->run(['command' => 'cache:clear']);
-
         self::assertSame(24, $status);
         self::assertStringContainsString('SS-CACHE-0010', $display);
     }
@@ -95,32 +87,39 @@ final class CacheCommandsIntegrationTest extends TestCase
     {
         $identity = GitRepositoryIdentity::fromUrl('https://github.com/acme/example.git');
         GitCache::default()->saveMetadata(GitCacheMetadata::create($identity));
-        self::assertDirectoryExists($this->root);
 
         [$status, $display] = $this->run(['command' => 'cache:clear', '--yes' => true]);
-
         self::assertSame(0, $status);
         self::assertStringContainsString('SourceSlate Git cache cleared.', $display);
         self::assertDirectoryDoesNotExist($this->root);
+    }
+
+    public function testCacheClearRefusesToDeleteActiveEntry(): void
+    {
+        $identity = GitRepositoryIdentity::fromUrl('https://github.com/acme/active.git');
+        $cache = GitCache::default();
+        $cache->saveMetadata(GitCacheMetadata::create($identity));
+        $lock = $cache->lock($identity);
+        $lock->acquire();
+
+        try {
+            [$status, $display] = $this->run(['command' => 'cache:clear', '--yes' => true]);
+            self::assertSame(24, $status);
+            self::assertStringContainsString('SS-CACHE-0025', $display);
+            self::assertDirectoryExists($cache->repositoryDirectory($identity));
+        } finally {
+            $lock->release();
+        }
     }
 
     public function testCachePruneDryRunDoesNotDeleteSelectedEntry(): void
     {
         $identity = GitRepositoryIdentity::fromUrl('https://github.com/acme/old.git');
         $cache = GitCache::default();
-        $cache->saveMetadata(new GitCacheMetadata(
-            identity: $identity,
-            createdAt: '2020-01-01T00:00:00+00:00',
-            lastUsedAt: '2020-01-01T00:00:00+00:00',
-        ));
+        $cache->saveMetadata(new GitCacheMetadata(identity: $identity, createdAt: '2020-01-01T00:00:00+00:00', lastUsedAt: '2020-01-01T00:00:00+00:00'));
         $directory = $cache->repositoryDirectory($identity);
 
-        [$status, $display] = $this->run([
-            'command' => 'cache:prune',
-            '--older-than' => '1d',
-            '--dry-run' => true,
-        ]);
-
+        [$status, $display] = $this->run(['command' => 'cache:prune', '--older-than' => '1d', '--dry-run' => true]);
         self::assertSame(0, $status);
         self::assertStringContainsString('Would prune:', $display);
         self::assertDirectoryExists($directory);
@@ -130,18 +129,10 @@ final class CacheCommandsIntegrationTest extends TestCase
     {
         $identity = GitRepositoryIdentity::fromUrl('https://github.com/acme/old.git');
         $cache = GitCache::default();
-        $cache->saveMetadata(new GitCacheMetadata(
-            identity: $identity,
-            createdAt: '2020-01-01T00:00:00+00:00',
-            lastUsedAt: '2020-01-01T00:00:00+00:00',
-        ));
+        $cache->saveMetadata(new GitCacheMetadata(identity: $identity, createdAt: '2020-01-01T00:00:00+00:00', lastUsedAt: '2020-01-01T00:00:00+00:00'));
         $directory = $cache->repositoryDirectory($identity);
 
-        [$status, $display] = $this->run([
-            'command' => 'cache:prune',
-            '--older-than' => '1d',
-        ]);
-
+        [$status, $display] = $this->run(['command' => 'cache:prune', '--older-than' => '1d']);
         self::assertSame(0, $status);
         self::assertStringContainsString('Pruning:', $display);
         self::assertDirectoryDoesNotExist($directory);
@@ -153,10 +144,60 @@ final class CacheCommandsIntegrationTest extends TestCase
         GitCache::default()->saveMetadata(GitCacheMetadata::create($identity));
 
         [$status, $display] = $this->run(['command' => 'cache:verify']);
-
         self::assertSame(24, $status);
         self::assertStringContainsString('SS-CACHE-0201', $display);
         self::assertStringContainsString('SS-CACHE-0203', $display);
+    }
+
+    public function testCacheRepairRequiresConfirmation(): void
+    {
+        [$status, $display] = $this->run(['command' => 'cache:repair', 'repository' => 'https://github.com/acme/example.git']);
+        self::assertSame(24, $status);
+        self::assertStringContainsString('SS-CACHE-0010', $display);
+    }
+
+    public function testCacheRepairRefusesActiveEntry(): void
+    {
+        $identity = GitRepositoryIdentity::fromUrl('https://github.com/acme/active.git');
+        $cache = GitCache::default();
+        $cache->saveMetadata(GitCacheMetadata::create($identity));
+        $lock = $cache->lock($identity);
+        $lock->acquire();
+
+        try {
+            [$status, $display] = $this->run(['command' => 'cache:repair', 'repository' => 'https://github.com/acme/active.git', '--yes' => true]);
+            self::assertSame(24, $status);
+            self::assertStringContainsString('SS-CACHE-0025', $display);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    public function testCacheRepairRebuildsRepositoryFromLocalRemote(): void
+    {
+        $remote = $this->root . '-remote.git';
+        $work = $this->root . '-work';
+        mkdir($work, 0777, true);
+        file_put_contents($work . DIRECTORY_SEPARATOR . 'Example.php', "<?php\nfinal class Example {}\n");
+        $git = new GitClient(30);
+        $git->run(['init', '-b', 'main'], $work);
+        $git->run(['add', '.'], $work);
+        $git->run(['-c', 'user.name=SourceSlate Tests', '-c', 'user.email=sourceslate@example.test', 'commit', '-m', 'initial'], $work);
+        $git->run(['init', '--bare', $remote]);
+        $git->run(['remote', 'add', 'origin', $this->fileUrl($remote)], $work);
+        $git->run(['push', '-u', 'origin', 'main'], $work);
+
+        try {
+            [$status, $display] = $this->run(['command' => 'cache:repair', 'repository' => $this->fileUrl($remote), '--yes' => true]);
+            self::assertSame(0, $status);
+            self::assertStringContainsString('Rebuilt cache for', $display);
+            $identity = GitRepositoryIdentity::fromUrl($this->fileUrl($remote));
+            self::assertDirectoryExists(GitCache::default()->bareRepository($identity));
+            self::assertFileExists(GitCache::default()->metadataPath($identity));
+        } finally {
+            $this->removeDirectory($remote);
+            $this->removeDirectory($work);
+        }
     }
 
     /** @return array{0:int,1:string} */
@@ -167,8 +208,13 @@ final class CacheCommandsIntegrationTest extends TestCase
         $application->setCatchExceptions(true);
         $tester = new ApplicationTester($application);
         $status = $tester->run($input, ['capture_stderr_separately' => false]);
-
         return [$status, $tester->getDisplay(true)];
+    }
+
+    private function fileUrl(string $path): string
+    {
+        $normalized = str_replace(DIRECTORY_SEPARATOR, '/', $path);
+        return preg_match('/^[A-Za-z]:\//', $normalized) === 1 ? 'file:///' . $normalized : 'file://' . $normalized;
     }
 
     private function removeDirectory(string $path): void
@@ -177,7 +223,6 @@ final class CacheCommandsIntegrationTest extends TestCase
             @unlink($path);
             return;
         }
-
         foreach (array_diff(scandir($path) ?: [], ['.', '..']) as $item) {
             $child = $path . DIRECTORY_SEPARATOR . $item;
             if (is_dir($child) && !is_link($child)) {
