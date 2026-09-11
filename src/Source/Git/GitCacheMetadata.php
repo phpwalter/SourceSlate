@@ -71,7 +71,7 @@ final readonly class GitCacheMetadata
             'schema_version' => self::SCHEMA_VERSION,
             'repository' => [
                 'canonical_url' => $this->identity->canonicalUrl,
-                'transport_url' => $this->identity->originalUrl,
+                'transport_url' => $this->identity->redactedUrl,
                 'cache_key' => $this->identity->cacheKey,
             ],
             'state' => [
