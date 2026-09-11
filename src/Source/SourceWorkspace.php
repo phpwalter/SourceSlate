@@ -16,6 +16,7 @@ final readonly class SourceWorkspace
         public ?string $cacheStatus = null,
         public ?string $gitState = null,
         public ?string $branch = null,
+        public ?string $repositoryRoot = null,
     ) {
     }
 }
