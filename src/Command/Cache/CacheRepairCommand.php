@@ -38,6 +38,14 @@ final class CacheRepairCommand extends Command
             $cache = GitCache::default();
             $directory = $cache->repositoryDirectory($identity);
 
+            if (is_dir($directory) && $cache->isActive($identity)) {
+                throw new CacheException(
+                    'SS-CACHE-0025',
+                    sprintf('Cannot repair cache for %s while it is active.', $identity->canonicalUrl),
+                    24,
+                );
+            }
+
             if (is_dir($directory)) {
                 $this->removeTree($directory);
             }
