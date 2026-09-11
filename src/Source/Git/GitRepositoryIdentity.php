@@ -8,6 +8,7 @@ final readonly class GitRepositoryIdentity
 {
     public function __construct(
         public string $originalUrl,
+        public string $redactedUrl,
         public string $canonicalUrl,
         public string $cacheKey,
     ) {
@@ -19,9 +20,26 @@ final readonly class GitRepositoryIdentity
 
         return new self(
             originalUrl: $url,
+            redactedUrl: self::redact($url),
             canonicalUrl: $canonical,
             cacheKey: hash('sha256', $canonical),
         );
+    }
+
+    private static function redact(string $url): string
+    {
+        $value = trim($url);
+        $parts = parse_url($value);
+        if ($parts === false || !isset($parts['host']) || !isset($parts['scheme'])) {
+            return $value;
+        }
+
+        $scheme = $parts['scheme'];
+        $host = $parts['host'];
+        $port = isset($parts['port']) ? ':' . $parts['port'] : '';
+        $path = $parts['path'] ?? '';
+
+        return sprintf('%s://%s%s%s', $scheme, $host, $port, $path);
     }
 
     private static function canonicalize(string $url): string
