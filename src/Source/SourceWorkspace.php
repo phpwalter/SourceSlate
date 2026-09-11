@@ -13,6 +13,7 @@ final readonly class SourceWorkspace
         public ?string $requestedRef = null,
         public ?string $resolvedCommit = null,
         public bool $offline = false,
+        public ?string $cacheStatus = null,
     ) {
     }
 }
