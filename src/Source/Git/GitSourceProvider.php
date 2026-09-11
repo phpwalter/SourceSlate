@@ -97,7 +97,38 @@ final readonly class GitSourceProvider
         }
 
         if ($request->ref !== null) {
-            return GitRef::explicit($request->ref);
+            $ref = trim($request->ref);
+            if ($ref === '') {
+                throw new GitException('SS-GIT-0023', 'Git ref cannot be empty.', 23);
+            }
+
+            if (str_starts_with($ref, 'refs/') || preg_match('/^[0-9a-f]{4,40}$/i', $ref) === 1) {
+                return GitRef::explicit($ref);
+            }
+
+            $branchRevision = 'refs/heads/' . $ref;
+            $tagRevision = 'refs/tags/' . $ref;
+            $branchExists = $this->refExists($bare, $branchRevision);
+            $tagExists = $this->refExists($bare, $tagRevision);
+
+            if ($branchExists && $tagExists) {
+                throw new GitException('SS-GIT-0108', sprintf(
+                    'Ref "%s" is ambiguous; both %s and %s exist. Use --branch or --tag.',
+                    $ref,
+                    $branchRevision,
+                    $tagRevision,
+                ), 23);
+            }
+
+            if ($branchExists) {
+                return GitRef::resolved($ref, $branchRevision, 'branch');
+            }
+
+            if ($tagExists) {
+                return GitRef::resolved($ref, $tagRevision, 'tag');
+            }
+
+            return GitRef::explicit($ref);
         }
 
         $symbolic = $this->git->run(['--git-dir=' . $bare, 'symbolic-ref', 'HEAD']);
@@ -107,6 +138,16 @@ final readonly class GitSourceProvider
         }
 
         return GitRef::defaultBranch(substr($symbolic, strlen($prefix)));
+    }
+
+    private function refExists(string $bare, string $revision): bool
+    {
+        try {
+            $this->git->run(['--git-dir=' . $bare, 'show-ref', '--verify', '--quiet', $revision]);
+            return true;
+        } catch (GitException) {
+            return false;
+        }
     }
 
     private function tryResolveCommit(string $bare, GitRef $gitRef): ?string
