@@ -3,7 +3,7 @@
 /**
  * @file BuildCommand.php
  * @path src/Command/BuildCommand.php
- * @version 1.6.0
+ * @version 1.7.0
  * @date 2026-09-11
  * @author Walter Torres
  * @copyright Copyright 2026, Walter Torres.
@@ -115,7 +115,12 @@ final class BuildCommand extends Command
             $staging = null;
 
             if ($workspace->remote) {
-                $output->writeln(sprintf('<info>Resolved %s at %s.</info>', $workspace->repository, $workspace->resolvedCommit));
+                $output->writeln(sprintf(
+                    '<info>Resolved %s at %s (cache: %s).</info>',
+                    $workspace->repository,
+                    $workspace->resolvedCommit,
+                    $workspace->cacheStatus ?? 'unknown',
+                ));
             }
 
             $output->writeln(sprintf(
