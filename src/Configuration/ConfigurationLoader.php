@@ -3,7 +3,7 @@
 /**
  * @file ConfigurationLoader.php
  * @path src/Configuration/ConfigurationLoader.php
- * @version 1.1.0
+ * @version 1.2.0
  * @date 2026-09-11
  * @author Walter Torres
  * @copyright Copyright 2026, Walter Torres.
@@ -24,13 +24,18 @@ use Symfony\Component\Yaml\Yaml;
 final class ConfigurationLoader
 {
     /**
-     * Precedence: explicit CLI file > SOURCESLATE_CONFIG > repository config > user config > defaults.
+     * Precedence: explicit CLI file > SOURCESLATE_CONFIG > source-path config > repository-root config > user config > defaults.
      */
-    public function load(string $projectRoot, ?string $configFile = null): Configuration
+    public function load(string $projectRoot, ?string $configFile = null, ?string $repositoryRoot = null): Configuration
     {
         $root = realpath($projectRoot);
         if ($root === false || !is_dir($root)) {
             throw new InvalidArgumentException(sprintf('Project root does not exist: %s', $projectRoot));
+        }
+
+        $repoRoot = $repositoryRoot !== null ? realpath($repositoryRoot) : $root;
+        if ($repoRoot === false || !is_dir($repoRoot)) {
+            throw new InvalidArgumentException(sprintf('Repository root does not exist: %s', (string) $repositoryRoot));
         }
 
         $data = [];
@@ -40,9 +45,16 @@ final class ConfigurationLoader
             $data = $this->merge($data, $this->parseFile($userConfig));
         }
 
-        $repositoryConfig = $root . DIRECTORY_SEPARATOR . 'sourceslate.yaml';
+        $repositoryConfig = $repoRoot . DIRECTORY_SEPARATOR . 'sourceslate.yaml';
         if (is_file($repositoryConfig)) {
-            $data = $this->merge($data, $this->parseFile($repositoryConfig));
+            $data = $this->merge($data, $this->parseRepositoryFile($repositoryConfig));
+        }
+
+        if ($root !== $repoRoot) {
+            $sourceConfig = $root . DIRECTORY_SEPARATOR . 'sourceslate.yaml';
+            if (is_file($sourceConfig)) {
+                $data = $this->merge($data, $this->parseRepositoryFile($sourceConfig));
+            }
         }
 
         $environmentConfig = getenv('SOURCESLATE_CONFIG');
@@ -82,6 +94,18 @@ final class ConfigurationLoader
             outputPath: (string) ($output['path'] ?? 'docs'),
             updateSource: (bool) ($headers['update'] ?? false),
         );
+    }
+
+    private function parseRepositoryFile(string $path): array
+    {
+        $data = $this->parseFile($path);
+        foreach (['git', 'cache', 'security', 'credentials'] as $forbidden) {
+            if (array_key_exists($forbidden, $data)) {
+                throw new InvalidArgumentException(sprintf('Repository configuration may not define security-sensitive "%s" settings: %s', $forbidden, $path));
+            }
+        }
+
+        return $data;
     }
 
     private function parseFile(string $path): array
