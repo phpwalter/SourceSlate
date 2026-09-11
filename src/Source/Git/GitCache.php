@@ -55,7 +55,17 @@ final readonly class GitCache
 
     public function lock(GitRepositoryIdentity $identity): GitCacheLock
     {
-        return new GitCacheLock($this->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'locks' . DIRECTORY_SEPARATOR . 'fetch.lock');
+        return new GitCacheLock($this->lockPath($identity));
+    }
+
+    public function isActive(GitRepositoryIdentity $identity): bool
+    {
+        return $this->isLockPathActive($this->lockPath($identity));
+    }
+
+    public function isRepositoryDirectoryActive(string $directory): bool
+    {
+        return $this->isLockPathActive($directory . DIRECTORY_SEPARATOR . 'locks' . DIRECTORY_SEPARATOR . 'fetch.lock');
     }
 
     public function worktreeDirectory(GitRepositoryIdentity $identity, string $commit): string
@@ -104,5 +114,31 @@ final readonly class GitCache
         if (file_put_contents($path, $json, LOCK_EX) === false) {
             throw new \RuntimeException(sprintf('Unable to write SourceSlate Git cache metadata: %s', $path));
         }
+    }
+
+    private function lockPath(GitRepositoryIdentity $identity): string
+    {
+        return $this->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'locks' . DIRECTORY_SEPARATOR . 'fetch.lock';
+    }
+
+    private function isLockPathActive(string $path): bool
+    {
+        $directory = dirname($path);
+        if (!is_dir($directory)) {
+            return false;
+        }
+
+        $handle = fopen($path, 'c+');
+        if ($handle === false) {
+            return true;
+        }
+
+        $acquired = flock($handle, LOCK_EX | LOCK_NB);
+        if ($acquired) {
+            flock($handle, LOCK_UN);
+        }
+        fclose($handle);
+
+        return !$acquired;
     }
 }
