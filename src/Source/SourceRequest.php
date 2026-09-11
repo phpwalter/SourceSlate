@@ -16,10 +16,20 @@ final readonly class SourceRequest
         public bool $refresh = false,
         public bool $offline = false,
         public bool $recurseSubmodules = false,
+        public ?string $sourceType = null,
+        public int $gitTimeout = 60,
     ) {
         $selectors = array_filter([$branch, $tag, $ref], static fn (?string $value): bool => $value !== null);
         if (count($selectors) > 1) {
             throw new \InvalidArgumentException('--branch, --tag, and --ref are mutually exclusive.');
+        }
+
+        if ($sourceType !== null && !in_array($sourceType, ['local', 'git'], true)) {
+            throw new \InvalidArgumentException('--source-type must be either local or git.');
+        }
+
+        if ($gitTimeout < 1) {
+            throw new \InvalidArgumentException('--git-timeout must be greater than zero.');
         }
     }
 
