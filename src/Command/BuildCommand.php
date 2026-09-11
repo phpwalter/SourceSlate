@@ -3,7 +3,7 @@
 /**
  * @file BuildCommand.php
  * @path src/Command/BuildCommand.php
- * @version 1.9.0
+ * @version 1.10.0
  * @date 2026-09-11
  * @author Walter Torres
  * @copyright Copyright 2026, Walter Torres.
@@ -55,7 +55,7 @@ final class BuildCommand extends Command
             ->addOption('ref', null, InputOption::VALUE_REQUIRED, 'Remote Git branch ref, tag ref, or commit SHA to document.')
             ->addOption('source-type', null, InputOption::VALUE_REQUIRED, 'Force source interpretation: local or git.')
             ->addOption('source-path', null, InputOption::VALUE_REQUIRED, 'Subdirectory within the resolved source workspace.')
-            ->addOption('git-timeout', null, InputOption::VALUE_REQUIRED, 'Git command timeout in seconds.', '60')
+            ->addOption('git-timeout', null, InputOption::VALUE_REQUIRED, 'Git command timeout in seconds. Overrides SOURCESLATE_GIT_TIMEOUT.')
             ->addOption('refresh', null, InputOption::VALUE_NONE, 'Force remote revalidation when supported.')
             ->addOption('offline', null, InputOption::VALUE_NONE, 'Use only the persistent Git cache; never contact the remote.')
             ->addOption('recurse-submodules', null, InputOption::VALUE_NONE, 'Fetch submodules for the resolved worktree.')
@@ -72,7 +72,7 @@ final class BuildCommand extends Command
         $json = (bool) $input->getOption('json');
 
         try {
-            $gitTimeout = (int) $input->getOption('git-timeout');
+            $gitTimeout = $this->resolveGitTimeout($input->getOption('git-timeout'));
             $request = new SourceRequest(
                 source: (string) $input->getArgument('project'),
                 output: $input->getOption('output') !== null ? (string) $input->getOption('output') : null,
@@ -235,6 +235,28 @@ final class BuildCommand extends Command
 
             return Command::FAILURE;
         }
+    }
+
+    private function resolveGitTimeout(mixed $cliValue): int
+    {
+        if ($cliValue !== null && trim((string) $cliValue) !== '') {
+            $value = (int) $cliValue;
+            if ($value < 1) {
+                throw new SourceSlateException('SS-CFG-0011', '--git-timeout must be greater than zero.', 11);
+            }
+            return $value;
+        }
+
+        $environment = getenv('SOURCESLATE_GIT_TIMEOUT');
+        if (is_string($environment) && trim($environment) !== '') {
+            $value = (int) $environment;
+            if ($value < 1) {
+                throw new SourceSlateException('SS-CFG-0011', 'SOURCESLATE_GIT_TIMEOUT must be greater than zero.', 11);
+            }
+            return $value;
+        }
+
+        return 60;
     }
 
     private function emitDryRun(OutputInterface $output, bool $json, object $workspace, ?string $configPath, object $config, string $outputDirectory): void
