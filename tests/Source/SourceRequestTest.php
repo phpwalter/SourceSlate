@@ -37,4 +37,29 @@ final class SourceRequestTest extends TestCase
 
         new SourceRequest('https://example.test/repo.git', branch: 'main', tag: 'v1.0.0');
     }
+
+    public function testSourceTypeAcceptsLocalAndGit(): void
+    {
+        $local = new SourceRequest('.', sourceType: 'local');
+        $git = new SourceRequest('https://example.test/repo.git', sourceType: 'git');
+
+        self::assertSame('local', $local->sourceType);
+        self::assertSame('git', $git->sourceType);
+    }
+
+    public function testInvalidSourceTypeIsRejected(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('--source-type must be either local or git.');
+
+        new SourceRequest('.', sourceType: 'archive');
+    }
+
+    public function testGitTimeoutMustBePositive(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('--git-timeout must be greater than zero.');
+
+        new SourceRequest('.', gitTimeout: 0);
+    }
 }
