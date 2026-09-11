@@ -95,6 +95,7 @@ final readonly class GitSourceProvider
                 resolvedCommit: $commit,
                 offline: $request->offline || $cacheStatus === 'cached-unverified',
                 cacheStatus: $cacheStatus,
+                repositoryRoot: $worktree,
             );
         } finally {
             $lock->release();
@@ -131,7 +132,22 @@ final readonly class GitSourceProvider
             throw new GitException('SS-GIT-0023', 'Git ref cannot be empty.', 23);
         }
 
-        if (str_starts_with($trimmed, 'refs/') || preg_match('/^[0-9a-f]{7,40}$/i', $trimmed) === 1) {
+        if (preg_match('/^[0-9a-f]{7,39}$/i', $trimmed) === 1) {
+            $matches = preg_split('/\R+/', trim($this->git->run(['--git-dir=' . $bare, 'rev-parse', '--disambiguate=' . $trimmed]))) ?: [];
+            $matches = array_values(array_filter($matches, static fn (string $value): bool => $value !== ''));
+
+            if (count($matches) === 0) {
+                throw new GitException('SS-GIT-0023', sprintf('Commit prefix "%s" does not resolve to an object.', $trimmed), 23);
+            }
+
+            if (count($matches) > 1) {
+                throw new GitException('SS-GIT-0109', sprintf('Commit prefix "%s" is ambiguous; use a longer SHA.', $trimmed), 23);
+            }
+
+            return GitRef::explicit($matches[0]);
+        }
+
+        if (preg_match('/^[0-9a-f]{40}$/i', $trimmed) === 1 || str_starts_with($trimmed, 'refs/')) {
             return GitRef::explicit($trimmed);
         }
 
