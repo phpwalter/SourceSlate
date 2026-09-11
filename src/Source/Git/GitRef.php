@@ -43,6 +43,11 @@ final readonly class GitRef
         return new self($ref, $ref, 'ref');
     }
 
+    public static function resolved(string $requested, string $revision, string $kind): self
+    {
+        return new self($requested, $revision, $kind);
+    }
+
     public static function defaultBranch(string $branch): self
     {
         return self::branch($branch);
