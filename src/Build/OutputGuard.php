@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SourceSlate\Build;
 
+use SourceSlate\Exception\OutputException;
+
 final readonly class OutputGuard
 {
     public function assertWritable(string $outputDirectory, bool $force = false): void
@@ -13,12 +15,20 @@ final readonly class OutputGuard
         }
 
         if (!is_dir($outputDirectory)) {
-            throw new \InvalidArgumentException(sprintf('Output path is not a directory: %s', $outputDirectory));
+            throw new OutputException(
+                'SS-OUT-0040',
+                sprintf('Output path is not a directory: %s', $outputDirectory),
+                40,
+            );
         }
 
         $entries = scandir($outputDirectory);
         if ($entries === false) {
-            throw new \RuntimeException(sprintf('Unable to inspect output directory: %s', $outputDirectory));
+            throw new OutputException(
+                'SS-OUT-0040',
+                sprintf('Unable to inspect output directory: %s', $outputDirectory),
+                40,
+            );
         }
 
         $entries = array_values(array_diff($entries, ['.', '..']));
@@ -35,9 +45,13 @@ final readonly class OutputGuard
             return;
         }
 
-        throw new \InvalidArgumentException(sprintf(
-            'Output directory contains unmanaged files and has no .sourceslate-manifest.json: %s. Use --force-output to allow replacement.',
-            $outputDirectory,
-        ));
+        throw new OutputException(
+            'SS-OUT-0041',
+            sprintf(
+                'Output directory contains unmanaged files and has no .sourceslate-manifest.json: %s. Use --force-output to allow replacement.',
+                $outputDirectory,
+            ),
+            41,
+        );
     }
 }
