@@ -29,7 +29,8 @@ final class CachePruneCommand extends Command
             $seconds = $this->parseAge((string) $input->getOption('older-than'));
             $threshold = time() - $seconds;
             $maxSize = $input->getOption('max-size') !== null ? $this->parseSize((string) $input->getOption('max-size')) : null;
-            $root = GitCache::default()->root();
+            $cache = GitCache::default();
+            $root = $cache->root();
             $dryRun = (bool) $input->getOption('dry-run');
 
             if (!is_dir($root)) {
@@ -37,7 +38,7 @@ final class CachePruneCommand extends Command
                 return Command::SUCCESS;
             }
 
-            $entries = $this->entries($root);
+            $entries = $this->entries($root, $cache);
             $selected = [];
 
             foreach ($entries as $entry) {
@@ -96,7 +97,7 @@ final class CachePruneCommand extends Command
     }
 
     /** @return list<array{directory:string,repository:string,last_used:int,size:int,active:bool}> */
-    private function entries(string $root): array
+    private function entries(string $root, GitCache $cache): array
     {
         $entries = [];
         foreach (array_values(array_diff(scandir($root) ?: [], ['.', '..'])) as $name) {
@@ -122,33 +123,11 @@ final class CachePruneCommand extends Command
                 'repository' => (string) ($data['repository']['canonical_url'] ?? $name),
                 'last_used' => $lastUsed,
                 'size' => $this->directorySize($directory),
-                'active' => $this->isActive($directory),
+                'active' => $cache->isRepositoryDirectoryActive($directory),
             ];
         }
 
         return $entries;
-    }
-
-    private function isActive(string $directory): bool
-    {
-        $path = $directory . DIRECTORY_SEPARATOR . 'locks' . DIRECTORY_SEPARATOR . 'fetch.lock';
-        $lockDirectory = dirname($path);
-        if (!is_dir($lockDirectory)) {
-            return false;
-        }
-
-        $handle = fopen($path, 'c+');
-        if ($handle === false) {
-            return true;
-        }
-
-        $acquired = flock($handle, LOCK_EX | LOCK_NB);
-        if ($acquired) {
-            flock($handle, LOCK_UN);
-        }
-        fclose($handle);
-
-        return !$acquired;
     }
 
     private function parseAge(string $value): int
