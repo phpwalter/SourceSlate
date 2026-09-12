@@ -15,6 +15,8 @@ final class BuildStagingArea
             throw new \RuntimeException(sprintf('Unable to create output parent directory: %s', $parent));
         }
 
+        $this->recoverInterruptedPublication();
+
         $this->path = $parent . DIRECTORY_SEPARATOR . '.sourceslate-build-' . bin2hex(random_bytes(8));
         if (!mkdir($this->path, 0777, true) && !is_dir($this->path)) {
             throw new \RuntimeException(sprintf('Unable to create SourceSlate staging directory: %s', $this->path));
@@ -52,6 +54,42 @@ final class BuildStagingArea
     {
         if (is_dir($this->path)) {
             $this->removeTree($this->path);
+        }
+    }
+
+    private function recoverInterruptedPublication(): void
+    {
+        $backups = glob($this->destination . '.sourceslate-previous-*') ?: [];
+        if ($backups === []) {
+            return;
+        }
+
+        usort($backups, static function (string $a, string $b): int {
+            $aTime = filemtime($a) ?: 0;
+            $bTime = filemtime($b) ?: 0;
+            return $bTime <=> $aTime;
+        });
+
+        if (!file_exists($this->destination)) {
+            $restore = array_shift($backups);
+            if ($restore !== null && !rename($restore, $this->destination)) {
+                throw new \RuntimeException(sprintf(
+                    'Unable to restore interrupted SourceSlate output publication from %s.',
+                    $restore,
+                ));
+            }
+        }
+
+        foreach ($backups as $backup) {
+            if (file_exists($backup)) {
+                $this->removeTree($backup);
+            }
+        }
+
+        if (file_exists($this->destination)) {
+            foreach (glob($this->destination . '.sourceslate-previous-*') ?: [] as $backup) {
+                $this->removeTree($backup);
+            }
         }
     }
 
