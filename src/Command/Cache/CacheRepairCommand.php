@@ -29,6 +29,8 @@ final class CacheRepairCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $candidate = null;
+
         try {
             if (!(bool) $input->getOption('yes')) {
                 throw new CacheException('SS-CACHE-0010', 'cache:repair requires --yes because it replaces the selected cached repository.', 24);
@@ -46,19 +48,53 @@ final class CacheRepairCommand extends Command
                 );
             }
 
-            if (is_dir($directory)) {
-                $this->removeTree($directory);
+            $candidate = $directory . '.repair-' . bin2hex(random_bytes(6));
+            $candidateBare = $candidate . DIRECTORY_SEPARATOR . 'repo.git';
+            $candidateMetadata = $candidate . DIRECTORY_SEPARATOR . 'metadata.json';
+
+            if (!mkdir($candidate, 0777, true) && !is_dir($candidate)) {
+                throw new CacheException('SS-CACHE-0024', sprintf('Unable to create repair staging directory: %s', $candidate), 24);
             }
 
-            $cache->ensureRepositoryDirectory($identity);
-            (new GitClient())->run(['clone', '--bare', $identity->originalUrl, $cache->bareRepository($identity)]);
-            $cache->saveMetadata(GitCacheMetadata::create($identity));
+            $git = new GitClient();
+            $git->run(['clone', '--bare', $identity->originalUrl, $candidateBare]);
+            $git->run(['--git-dir=' . $candidateBare, 'fsck', '--no-dangling']);
+
+            $metadata = GitCacheMetadata::create($identity);
+            $json = json_encode($metadata->toArray(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . PHP_EOL;
+            if (file_put_contents($candidateMetadata, $json, LOCK_EX) === false) {
+                throw new CacheException('SS-CACHE-0024', sprintf('Unable to write repair metadata: %s', $candidateMetadata), 24);
+            }
+
+            $backup = null;
+            if (is_dir($directory)) {
+                $backup = $directory . '.repair-backup-' . bin2hex(random_bytes(6));
+                if (!rename($directory, $backup)) {
+                    throw new CacheException('SS-CACHE-0024', sprintf('Unable to preserve existing cache during repair: %s', $directory), 24);
+                }
+            }
+
+            if (!rename($candidate, $directory)) {
+                if ($backup !== null && !is_dir($directory)) {
+                    @rename($backup, $directory);
+                }
+                throw new CacheException('SS-CACHE-0024', sprintf('Unable to publish repaired cache: %s', $directory), 24);
+            }
+            $candidate = null;
+
+            if ($backup !== null) {
+                $this->removeTree($backup);
+            }
 
             $output->writeln(sprintf('<info>Rebuilt cache for %s.</info>', $identity->canonicalUrl));
             return Command::SUCCESS;
         } catch (SourceSlateException $exception) {
             $output->writeln(sprintf('<error>%s</error>', $exception->formattedMessage()));
             return $exception->exitCode;
+        } finally {
+            if ($candidate !== null && is_dir($candidate)) {
+                $this->removeTreeQuietly($candidate);
+            }
         }
     }
 
@@ -79,5 +115,25 @@ final class CacheRepairCommand extends Command
         if (!rmdir($path)) {
             throw new CacheException('SS-CACHE-0024', sprintf('Unable to remove cache directory during repair: %s', $path), 24);
         }
+    }
+
+    private function removeTreeQuietly(string $path): void
+    {
+        if (!is_dir($path)) {
+            return;
+        }
+
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST,
+        );
+
+        foreach ($iterator as $item) {
+            $item->isDir() && !$item->isLink()
+                ? @rmdir($item->getPathname())
+                : @unlink($item->getPathname());
+        }
+
+        @rmdir($path);
     }
 }
