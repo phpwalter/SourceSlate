@@ -15,12 +15,25 @@ final class BuildStagingArea
             throw new \RuntimeException(sprintf('Unable to create output parent directory: %s', $parent));
         }
 
-        $this->recoverInterruptedPublication();
+        $lock = new BuildPublicationLock($this->destination);
+        $lock->acquire();
+        try {
+            $this->recoverInterruptedPublication();
+            $this->cleanupStaleStagingDirectories($parent);
+        } finally {
+            $lock->release();
+        }
 
         $this->path = $parent . DIRECTORY_SEPARATOR . '.sourceslate-build-' . bin2hex(random_bytes(8));
         if (!mkdir($this->path, 0777, true) && !is_dir($this->path)) {
             throw new \RuntimeException(sprintf('Unable to create SourceSlate staging directory: %s', $this->path));
         }
+        file_put_contents($this->path . DIRECTORY_SEPARATOR . '.sourceslate-staging-owner.json', json_encode([
+            'pid' => getmypid(),
+            'hostname' => gethostname() ?: null,
+            'destination' => $this->destination,
+            'created_at' => gmdate('c'),
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL);
     }
 
     public function path(): string
@@ -30,23 +43,33 @@ final class BuildStagingArea
 
     public function publish(): void
     {
-        $backup = null;
-        if (file_exists($this->destination)) {
-            $backup = $this->destination . '.sourceslate-previous-' . bin2hex(random_bytes(6));
-            if (!rename($this->destination, $backup)) {
-                throw new \RuntimeException(sprintf('Unable to preserve existing SourceSlate output: %s', $this->destination));
-            }
-        }
+        $lock = new BuildPublicationLock($this->destination);
+        $lock->acquire();
+        try {
+            $this->recoverInterruptedPublication();
 
-        if (!rename($this->path, $this->destination)) {
-            if ($backup !== null && !file_exists($this->destination)) {
-                @rename($backup, $this->destination);
+            $backup = null;
+            if (file_exists($this->destination)) {
+                $backup = $this->destination . '.sourceslate-previous-' . bin2hex(random_bytes(6));
+                if (!rename($this->destination, $backup)) {
+                    throw new \RuntimeException(sprintf('Unable to preserve existing SourceSlate output: %s', $this->destination));
+                }
             }
-            throw new \RuntimeException(sprintf('Unable to publish SourceSlate output: %s', $this->destination));
-        }
 
-        if ($backup !== null) {
-            $this->removeTree($backup);
+            if (!rename($this->path, $this->destination)) {
+                if ($backup !== null && !file_exists($this->destination)) {
+                    @rename($backup, $this->destination);
+                }
+                throw new \RuntimeException(sprintf('Unable to publish SourceSlate output: %s', $this->destination));
+            }
+
+            @unlink($this->destination . DIRECTORY_SEPARATOR . '.sourceslate-staging-owner.json');
+
+            if ($backup !== null) {
+                $this->removeTree($backup);
+            }
+        } finally {
+            $lock->release();
         }
     }
 
@@ -73,10 +96,7 @@ final class BuildStagingArea
         if (!file_exists($this->destination)) {
             $restore = array_shift($backups);
             if ($restore !== null && !rename($restore, $this->destination)) {
-                throw new \RuntimeException(sprintf(
-                    'Unable to restore interrupted SourceSlate output publication from %s.',
-                    $restore,
-                ));
+                throw new \RuntimeException(sprintf('Unable to restore interrupted SourceSlate output publication from %s.', $restore));
             }
         }
 
@@ -89,6 +109,32 @@ final class BuildStagingArea
         if (file_exists($this->destination)) {
             foreach (glob($this->destination . '.sourceslate-previous-*') ?: [] as $backup) {
                 $this->removeTree($backup);
+            }
+        }
+    }
+
+    private function cleanupStaleStagingDirectories(string $parent): void
+    {
+        foreach (glob($parent . DIRECTORY_SEPARATOR . '.sourceslate-build-*') ?: [] as $candidate) {
+            if (!is_dir($candidate)) {
+                continue;
+            }
+
+            $owner = $candidate . DIRECTORY_SEPARATOR . '.sourceslate-staging-owner.json';
+            if (!is_file($owner)) {
+                $this->removeTree($candidate);
+                continue;
+            }
+
+            $data = json_decode((string) file_get_contents($owner), true);
+            if (!is_array($data)) {
+                $this->removeTree($candidate);
+                continue;
+            }
+
+            $created = isset($data['created_at']) ? strtotime((string) $data['created_at']) : false;
+            if ($created === false || $created < time() - 86400) {
+                $this->removeTree($candidate);
             }
         }
     }
