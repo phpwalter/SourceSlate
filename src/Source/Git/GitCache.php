@@ -110,9 +110,33 @@ final readonly class GitCache
     {
         $this->ensureRepositoryDirectory($metadata->identity);
         $path = $this->metadataPath($metadata->identity);
+        $temporary = $path . '.tmp-' . bin2hex(random_bytes(6));
         $json = json_encode($metadata->toArray(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . PHP_EOL;
-        if (file_put_contents($path, $json, LOCK_EX) === false) {
-            throw new \RuntimeException(sprintf('Unable to write SourceSlate Git cache metadata: %s', $path));
+
+        try {
+            if (file_put_contents($temporary, $json, LOCK_EX) === false) {
+                throw new \RuntimeException(sprintf('Unable to write temporary SourceSlate Git cache metadata: %s', $temporary));
+            }
+
+            $handle = fopen($temporary, 'rb');
+            if ($handle === false) {
+                throw new \RuntimeException(sprintf('Unable to reopen temporary SourceSlate Git cache metadata: %s', $temporary));
+            }
+            try {
+                if (function_exists('fsync')) {
+                    fsync($handle);
+                }
+            } finally {
+                fclose($handle);
+            }
+
+            if (!rename($temporary, $path)) {
+                throw new \RuntimeException(sprintf('Unable to publish SourceSlate Git cache metadata: %s', $path));
+            }
+        } finally {
+            if (is_file($temporary)) {
+                @unlink($temporary);
+            }
         }
     }
 
