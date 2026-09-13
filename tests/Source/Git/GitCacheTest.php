@@ -19,22 +19,10 @@ final class GitCacheTest extends TestCase
         $commit = str_repeat('a', 40);
 
         try {
-            self::assertSame(
-                $root . DIRECTORY_SEPARATOR . $identity->cacheKey,
-                $cache->repositoryDirectory($identity),
-            );
-            self::assertSame(
-                $cache->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'repo.git',
-                $cache->bareRepository($identity),
-            );
-            self::assertSame(
-                $cache->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'metadata.json',
-                $cache->metadataPath($identity),
-            );
-            self::assertSame(
-                $cache->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'worktrees' . DIRECTORY_SEPARATOR . $commit,
-                $cache->worktreeDirectory($identity, $commit),
-            );
+            self::assertSame($root . DIRECTORY_SEPARATOR . $identity->cacheKey, $cache->repositoryDirectory($identity));
+            self::assertSame($cache->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'repo.git', $cache->bareRepository($identity));
+            self::assertSame($cache->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'metadata.json', $cache->metadataPath($identity));
+            self::assertSame($cache->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'worktrees' . DIRECTORY_SEPARATOR . $commit, $cache->worktreeDirectory($identity, $commit));
         } finally {
             $this->removeDirectory($root);
         }
@@ -48,7 +36,6 @@ final class GitCacheTest extends TestCase
 
         try {
             $metadata = $cache->loadMetadata($identity);
-
             self::assertSame($identity->cacheKey, $metadata->identity->cacheKey);
             self::assertNotNull($metadata->createdAt);
             self::assertNotNull($metadata->lastUsedAt);
@@ -74,12 +61,48 @@ final class GitCacheTest extends TestCase
         try {
             $cache->saveMetadata($metadata);
             $loaded = $cache->loadMetadata($identity);
-
             self::assertSame($metadata->lastResolvedRef, $loaded->lastResolvedRef);
             self::assertSame($metadata->lastResolvedCommit, $loaded->lastResolvedCommit);
             self::assertSame($metadata->createdAt, $loaded->createdAt);
             self::assertSame($metadata->lastFetchAt, $loaded->lastFetchAt);
             self::assertSame($metadata->lastUsedAt, $loaded->lastUsedAt);
+        } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
+    public function testMetadataPublicationLeavesNoTemporaryFiles(): void
+    {
+        $root = $this->temporaryDirectory();
+        $cache = new GitCache($root);
+        $identity = GitRepositoryIdentity::fromUrl('https://github.com/acme/example.git');
+
+        try {
+            $cache->saveMetadata(GitCacheMetadata::create($identity));
+            $directory = $cache->repositoryDirectory($identity);
+
+            self::assertFileExists($cache->metadataPath($identity));
+            self::assertSame([], glob($directory . DIRECTORY_SEPARATOR . 'metadata.json.tmp-*') ?: []);
+        } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
+    public function testReplacingMetadataAlwaysLeavesValidJson(): void
+    {
+        $root = $this->temporaryDirectory();
+        $cache = new GitCache($root);
+        $identity = GitRepositoryIdentity::fromUrl('https://github.com/acme/example.git');
+
+        try {
+            $cache->saveMetadata(new GitCacheMetadata(identity: $identity, lastResolvedCommit: str_repeat('a', 40)));
+            $cache->saveMetadata(new GitCacheMetadata(identity: $identity, lastResolvedCommit: str_repeat('b', 40)));
+
+            $raw = file_get_contents($cache->metadataPath($identity));
+            self::assertIsString($raw);
+            $decoded = json_decode($raw, true, flags: JSON_THROW_ON_ERROR);
+            self::assertSame(str_repeat('b', 40), $decoded['state']['last_resolved_commit']);
+            self::assertSame([], glob($cache->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'metadata.json.tmp-*') ?: []);
         } finally {
             $this->removeDirectory($root);
         }
@@ -94,7 +117,6 @@ final class GitCacheTest extends TestCase
         try {
             $cache->ensureRepositoryDirectory($identity);
             file_put_contents($cache->metadataPath($identity), '{not-json');
-
             $this->expectException(\JsonException::class);
             $cache->loadMetadata($identity);
         } finally {
@@ -113,7 +135,6 @@ final class GitCacheTest extends TestCase
             $canonical = $cache->worktreeDirectory($identity, $commit);
             $first = $cache->alternateWorktreeDirectory($identity, $commit);
             $second = $cache->alternateWorktreeDirectory($identity, $commit);
-
             self::assertNotSame($canonical, $first);
             self::assertNotSame($first, $second);
             self::assertStringStartsWith($canonical . '-', $first);
@@ -127,7 +148,6 @@ final class GitCacheTest extends TestCase
     {
         $root = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'sourceslate-cache-' . bin2hex(random_bytes(6));
         mkdir($root, 0777, true);
-
         return $root;
     }
 
@@ -136,17 +156,10 @@ final class GitCacheTest extends TestCase
         if (!is_dir($path)) {
             return;
         }
-
-        $items = scandir($path);
-        if ($items === false) {
-            return;
-        }
-
-        foreach ($items as $item) {
+        foreach (scandir($path) ?: [] as $item) {
             if ($item === '.' || $item === '..') {
                 continue;
             }
-
             $child = $path . DIRECTORY_SEPARATOR . $item;
             if (is_dir($child) && !is_link($child)) {
                 $this->removeDirectory($child);
@@ -154,7 +167,6 @@ final class GitCacheTest extends TestCase
                 @unlink($child);
             }
         }
-
         @rmdir($path);
     }
 }
