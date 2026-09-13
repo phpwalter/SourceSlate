@@ -18,10 +18,12 @@ final class BuildStagingAreaTest extends TestCase
 
         try {
             $stagingPath = $staging->path();
+            self::assertFileExists($stagingPath . DIRECTORY_SEPARATOR . '.sourceslate-staging-owner.json');
             $staging->publish();
 
             self::assertDirectoryDoesNotExist($stagingPath);
             self::assertFileExists($destination . DIRECTORY_SEPARATOR . 'index.html');
+            self::assertFileDoesNotExist($destination . DIRECTORY_SEPARATOR . '.sourceslate-staging-owner.json');
             self::assertSame('new', file_get_contents($destination . DIRECTORY_SEPARATOR . 'index.html'));
         } finally {
             $this->removeDirectory($root);
@@ -40,7 +42,6 @@ final class BuildStagingAreaTest extends TestCase
 
         try {
             $staging->publish();
-
             self::assertSame('new', file_get_contents($destination . DIRECTORY_SEPARATOR . 'index.html'));
             self::assertSame([], glob($destination . '.sourceslate-previous-*') ?: []);
         } finally {
@@ -58,7 +59,6 @@ final class BuildStagingAreaTest extends TestCase
 
         try {
             $staging = new BuildStagingArea($destination);
-
             self::assertDirectoryExists($destination);
             self::assertSame('last-known-good', file_get_contents($destination . DIRECTORY_SEPARATOR . 'index.html'));
             self::assertDirectoryDoesNotExist($backup);
@@ -83,7 +83,6 @@ final class BuildStagingAreaTest extends TestCase
 
         try {
             $staging = new BuildStagingArea($destination);
-
             self::assertSame('newer', file_get_contents($destination . DIRECTORY_SEPARATOR . 'index.html'));
             self::assertDirectoryDoesNotExist($older);
             self::assertDirectoryDoesNotExist($newer);
@@ -105,9 +104,69 @@ final class BuildStagingAreaTest extends TestCase
 
         try {
             $staging = new BuildStagingArea($destination);
-
             self::assertSame('published', file_get_contents($destination . DIRECTORY_SEPARATOR . 'index.html'));
             self::assertDirectoryDoesNotExist($backup);
+            $staging->discard();
+        } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
+    public function testConstructorRemovesUnownedStaleStagingDirectory(): void
+    {
+        $root = $this->temporaryDirectory();
+        $destination = $root . DIRECTORY_SEPARATOR . 'docs';
+        $orphan = $root . DIRECTORY_SEPARATOR . '.sourceslate-build-orphan';
+        mkdir($orphan);
+        file_put_contents($orphan . DIRECTORY_SEPARATOR . 'partial.html', 'partial');
+
+        try {
+            $staging = new BuildStagingArea($destination);
+            self::assertDirectoryDoesNotExist($orphan);
+            $staging->discard();
+        } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
+    public function testConstructorRemovesOwnedStagingDirectoryOlderThanOneDay(): void
+    {
+        $root = $this->temporaryDirectory();
+        $destination = $root . DIRECTORY_SEPARATOR . 'docs';
+        $orphan = $root . DIRECTORY_SEPARATOR . '.sourceslate-build-old';
+        mkdir($orphan);
+        file_put_contents($orphan . DIRECTORY_SEPARATOR . '.sourceslate-staging-owner.json', json_encode([
+            'pid' => 999999,
+            'hostname' => 'stale-host',
+            'destination' => $destination,
+            'created_at' => gmdate('c', time() - 90000),
+        ], JSON_PRETTY_PRINT));
+
+        try {
+            $staging = new BuildStagingArea($destination);
+            self::assertDirectoryDoesNotExist($orphan);
+            $staging->discard();
+        } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
+    public function testConstructorPreservesFreshOwnedStagingDirectory(): void
+    {
+        $root = $this->temporaryDirectory();
+        $destination = $root . DIRECTORY_SEPARATOR . 'docs';
+        $active = $root . DIRECTORY_SEPARATOR . '.sourceslate-build-active';
+        mkdir($active);
+        file_put_contents($active . DIRECTORY_SEPARATOR . '.sourceslate-staging-owner.json', json_encode([
+            'pid' => getmypid(),
+            'hostname' => gethostname() ?: null,
+            'destination' => $destination,
+            'created_at' => gmdate('c'),
+        ], JSON_PRETTY_PRINT));
+
+        try {
+            $staging = new BuildStagingArea($destination);
+            self::assertDirectoryExists($active);
             $staging->discard();
         } finally {
             $this->removeDirectory($root);
@@ -127,7 +186,6 @@ final class BuildStagingAreaTest extends TestCase
         try {
             $stagingPath = $staging->path();
             $staging->discard();
-
             self::assertDirectoryDoesNotExist($stagingPath);
             self::assertSame('published', file_get_contents($destination . DIRECTORY_SEPARATOR . 'index.html'));
         } finally {
@@ -163,7 +221,6 @@ final class BuildStagingAreaTest extends TestCase
             @unlink($path);
             return;
         }
-
         foreach (array_diff(scandir($path) ?: [], ['.', '..']) as $item) {
             $child = $path . DIRECTORY_SEPARATOR . $item;
             if (is_dir($child) && !is_link($child)) {
