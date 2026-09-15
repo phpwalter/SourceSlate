@@ -58,6 +58,22 @@ final readonly class GitCache
         return new GitCacheLock($this->lockPath($identity));
     }
 
+    public function maintenanceLock(): GitCacheOperationLock
+    {
+        return new GitCacheOperationLock(
+            $this->root . DIRECTORY_SEPARATOR . '.locks' . DIRECTORY_SEPARATOR . 'cache-maintenance.lock',
+            'cache',
+        );
+    }
+
+    public function operationLock(GitRepositoryIdentity $identity): GitCacheOperationLock
+    {
+        return new GitCacheOperationLock(
+            $this->root . DIRECTORY_SEPARATOR . '.locks' . DIRECTORY_SEPARATOR . 'repositories' . DIRECTORY_SEPARATOR . $identity->cacheKey . '.lock',
+            $identity->canonicalUrl,
+        );
+    }
+
     public function isActive(GitRepositoryIdentity $identity): bool
     {
         return $this->isLockPathActive($this->lockPath($identity));
