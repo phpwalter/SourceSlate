@@ -33,7 +33,7 @@ PHP);
             self::assertCount(1, $project->files);
             self::assertCount(1, $project->files[0]->functions);
             self::assertSame('Demo\\helper', $project->files[0]->functions[0]->fullyQualifiedName);
-            self::assertSame("string $value = 'x'", $project->files[0]->functions[0]->parameters[0]);
+            self::assertSame("string \$value = 'x'", $project->files[0]->functions[0]->parameters[0]);
 
             self::assertCount(2, $project->files[0]->types);
             $example = $project->files[0]->types[0];
