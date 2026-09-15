@@ -7,9 +7,14 @@ namespace SourceSlate\Build;
 final class BuildStagingArea
 {
     private string $path;
+    private PublicationFilesystem $filesystem;
 
-    public function __construct(private readonly string $destination)
-    {
+    public function __construct(
+        private readonly string $destination,
+        ?PublicationFilesystem $filesystem = null,
+    ) {
+        $this->filesystem = $filesystem ?? new NativePublicationFilesystem();
+
         $parent = dirname($destination);
         if (!is_dir($parent) && !mkdir($parent, 0777, true) && !is_dir($parent)) {
             throw new \RuntimeException(sprintf('Unable to create output parent directory: %s', $parent));
@@ -49,21 +54,26 @@ final class BuildStagingArea
             $this->recoverInterruptedPublication();
 
             $backup = null;
-            if (file_exists($this->destination)) {
+            if ($this->filesystem->exists($this->destination)) {
                 $backup = $this->destination . '.sourceslate-previous-' . bin2hex(random_bytes(6));
-                if (!rename($this->destination, $backup)) {
+                if (!$this->filesystem->rename($this->destination, $backup)) {
                     throw new \RuntimeException(sprintf('Unable to preserve existing SourceSlate output: %s', $this->destination));
                 }
             }
 
-            if (!rename($this->path, $this->destination)) {
-                if ($backup !== null && !file_exists($this->destination)) {
-                    @rename($backup, $this->destination);
+            if (!$this->filesystem->rename($this->path, $this->destination)) {
+                if ($backup !== null && !$this->filesystem->exists($this->destination)) {
+                    if (!$this->filesystem->rename($backup, $this->destination)) {
+                        throw new \RuntimeException(sprintf(
+                            'Unable to publish SourceSlate output and unable to restore previous output. Backup preserved at: %s',
+                            $backup,
+                        ));
+                    }
                 }
                 throw new \RuntimeException(sprintf('Unable to publish SourceSlate output: %s', $this->destination));
             }
 
-            @unlink($this->destination . DIRECTORY_SEPARATOR . '.sourceslate-staging-owner.json');
+            $this->filesystem->unlink($this->destination . DIRECTORY_SEPARATOR . '.sourceslate-staging-owner.json');
 
             if ($backup !== null) {
                 $this->removeTree($backup);
@@ -93,20 +103,20 @@ final class BuildStagingArea
             return $bTime <=> $aTime;
         });
 
-        if (!file_exists($this->destination)) {
+        if (!$this->filesystem->exists($this->destination)) {
             $restore = array_shift($backups);
-            if ($restore !== null && !rename($restore, $this->destination)) {
+            if ($restore !== null && !$this->filesystem->rename($restore, $this->destination)) {
                 throw new \RuntimeException(sprintf('Unable to restore interrupted SourceSlate output publication from %s.', $restore));
             }
         }
 
         foreach ($backups as $backup) {
-            if (file_exists($backup)) {
+            if ($this->filesystem->exists($backup)) {
                 $this->removeTree($backup);
             }
         }
 
-        if (file_exists($this->destination)) {
+        if ($this->filesystem->exists($this->destination)) {
             foreach (glob($this->destination . '.sourceslate-previous-*') ?: [] as $backup) {
                 $this->removeTree($backup);
             }
@@ -142,7 +152,7 @@ final class BuildStagingArea
     private function removeTree(string $path): void
     {
         if (!is_dir($path)) {
-            @unlink($path);
+            $this->filesystem->unlink($path);
             return;
         }
 
@@ -155,7 +165,7 @@ final class BuildStagingArea
             if ($item->isDir() && !$item->isLink()) {
                 @rmdir($item->getPathname());
             } else {
-                @unlink($item->getPathname());
+                $this->filesystem->unlink($item->getPathname());
             }
         }
 
