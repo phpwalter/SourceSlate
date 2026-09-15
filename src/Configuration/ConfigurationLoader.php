@@ -3,8 +3,8 @@
 /**
  * @file ConfigurationLoader.php
  * @path src/Configuration/ConfigurationLoader.php
- * @version 1.3.0
- * @date 2026-09-11
+ * @version 1.4.0
+ * @date 2026-09-15
  * @author Walter Torres
  * @copyright Copyright 2026, Walter Torres.
  * @license Proprietary
@@ -23,9 +23,8 @@ use Symfony\Component\Yaml\Yaml;
 
 final class ConfigurationLoader
 {
-    /**
-     * Precedence: explicit CLI file > SOURCESLATE_CONFIG > source-path config > repository-root config > user config > defaults.
-     */
+    private const TOP_LEVEL_KEYS = ['project', 'source', 'output', 'source_headers', 'git', 'cache', 'security', 'credentials'];
+
     public function load(string $projectRoot, ?string $configFile = null, ?string $repositoryRoot = null): Configuration
     {
         $root = realpath($projectRoot);
@@ -39,7 +38,6 @@ final class ConfigurationLoader
         }
 
         $data = [];
-
         $userConfig = $this->userConfigPath();
         if ($userConfig !== null && is_file($userConfig)) {
             $data = $this->merge($data, $this->parseFile($userConfig));
@@ -72,6 +70,7 @@ final class ConfigurationLoader
             $data = $this->merge($data, $this->parseFile($configFile));
         }
 
+        $this->validateTopLevelKeys($data);
         $project = is_array($data['project'] ?? null) ? $data['project'] : [];
         $source = is_array($data['source'] ?? null) ? $data['source'] : [];
         $output = is_array($data['output'] ?? null) ? $data['output'] : [];
@@ -86,14 +85,36 @@ final class ConfigurationLoader
         if (!is_array($paths) || $paths === []) {
             throw new InvalidArgumentException('source.paths must contain at least one source directory.');
         }
+        $paths = array_values(array_map(static fn (mixed $path): string => trim((string) $path), $paths));
+        foreach ($paths as $path) {
+            if ($path === '') {
+                throw new InvalidArgumentException('source.paths entries must not be blank.');
+            }
+        }
+
+        $exclude = is_array($source['exclude'] ?? null) ? $source['exclude'] : ['vendor'];
+        $exclude = array_values(array_map(static fn (mixed $path): string => trim((string) $path), $exclude));
+        $outputPath = trim((string) ($output['path'] ?? 'docs'));
+        if ($outputPath === '') {
+            throw new InvalidArgumentException('output.path must not be blank.');
+        }
 
         return new Configuration(
             projectName: $name,
-            sourcePaths: array_values(array_map('strval', $paths)),
-            excludePaths: array_values(array_map('strval', is_array($source['exclude'] ?? null) ? $source['exclude'] : ['vendor'])),
-            outputPath: (string) ($output['path'] ?? 'docs'),
+            sourcePaths: $paths,
+            excludePaths: $exclude,
+            outputPath: $outputPath,
             updateSource: (bool) ($headers['update'] ?? false),
         );
+    }
+
+    private function validateTopLevelKeys(array $data): void
+    {
+        foreach (array_keys($data) as $key) {
+            if (!in_array((string) $key, self::TOP_LEVEL_KEYS, true)) {
+                throw new InvalidArgumentException(sprintf('Unknown SourceSlate configuration key: %s', $key));
+            }
+        }
     }
 
     private function discoverRepositoryRoot(string $root): string
@@ -103,12 +124,10 @@ final class ConfigurationLoader
             if (file_exists($candidate . DIRECTORY_SEPARATOR . '.git')) {
                 return $candidate;
             }
-
             $parent = dirname($candidate);
             if ($parent === $candidate) {
                 return $root;
             }
-
             $candidate = $parent;
         }
     }
@@ -121,7 +140,6 @@ final class ConfigurationLoader
                 throw new InvalidArgumentException(sprintf('Repository configuration may not define security-sensitive "%s" settings: %s', $forbidden, $path));
             }
         }
-
         return $data;
     }
 
@@ -131,7 +149,6 @@ final class ConfigurationLoader
         if (!is_array($data)) {
             throw new InvalidArgumentException(sprintf('SourceSlate configuration must contain a YAML mapping: %s', $path));
         }
-
         return $data;
     }
 
@@ -144,7 +161,6 @@ final class ConfigurationLoader
                 $base[$key] = $value;
             }
         }
-
         return $base;
     }
 
@@ -156,16 +172,13 @@ final class ConfigurationLoader
                 ? $appData . DIRECTORY_SEPARATOR . 'SourceSlate' . DIRECTORY_SEPARATOR . 'config.yaml'
                 : null;
         }
-
         $home = getenv('HOME');
         if (!is_string($home) || $home === '') {
             return null;
         }
-
         if (PHP_OS_FAMILY === 'Darwin') {
             return $home . DIRECTORY_SEPARATOR . 'Library' . DIRECTORY_SEPARATOR . 'Application Support' . DIRECTORY_SEPARATOR . 'SourceSlate' . DIRECTORY_SEPARATOR . 'config.yaml';
         }
-
         return $home . DIRECTORY_SEPARATOR . '.config' . DIRECTORY_SEPARATOR . 'sourceslate' . DIRECTORY_SEPARATOR . 'config.yaml';
     }
 
@@ -176,7 +189,6 @@ final class ConfigurationLoader
                 return [$candidate];
             }
         }
-
         return ['.'];
     }
 }
