@@ -43,7 +43,7 @@ final class CacheVerifyRecoveryTest extends TestCase
         unset($metadata['schema_version']);
         file_put_contents($cache->metadataPath($identity), json_encode($metadata, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
 
-        [$status, $display] = $this->run(['command' => 'cache:verify', '--json' => true]);
+        [$status, $display] = $this->runCommand(['command' => 'cache:verify', '--json' => true]);
         $payload = json_decode($display, true, flags: JSON_THROW_ON_ERROR);
 
         self::assertSame(0, $status);
@@ -65,7 +65,7 @@ final class CacheVerifyRecoveryTest extends TestCase
             $this->fileUrl($otherRemote),
         ]);
 
-        [$status, $display] = $this->run(['command' => 'cache:verify', '--json' => true]);
+        [$status, $display] = $this->runCommand(['command' => 'cache:verify', '--json' => true]);
         $payload = json_decode($display, true, flags: JSON_THROW_ON_ERROR);
 
         self::assertSame(24, $status);
@@ -81,7 +81,7 @@ final class CacheVerifyRecoveryTest extends TestCase
         mkdir($invalid, 0777, true);
         file_put_contents($invalid . DIRECTORY_SEPARATOR . 'README.txt', 'not a git worktree');
 
-        [$status, $display] = $this->run(['command' => 'cache:verify', '--json' => true]);
+        [$status, $display] = $this->runCommand(['command' => 'cache:verify', '--json' => true]);
         $payload = json_decode($display, true, flags: JSON_THROW_ON_ERROR);
 
         self::assertSame(24, $status);
@@ -120,7 +120,7 @@ final class CacheVerifyRecoveryTest extends TestCase
     }
 
     /** @return array{0:int,1:string} */
-    private function run(array $input): array
+    private function runCommand(array $input): array
     {
         $application = new Application();
         $application->setAutoExit(false);
