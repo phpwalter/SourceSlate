@@ -6,6 +6,7 @@ namespace SourceSlate\Command\Cache;
 
 use SourceSlate\Exception\CacheException;
 use SourceSlate\Source\Git\GitCache;
+use SourceSlate\Source\Git\GitCacheOperationLock;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -22,12 +23,17 @@ final class CacheClearCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $maintenanceLock = null;
+
         try {
             if (!(bool) $input->getOption('yes')) {
                 throw new CacheException('SS-CACHE-0010', 'cache:clear requires --yes.', 24);
             }
 
             $cache = GitCache::default();
+            $maintenanceLock = $cache->maintenanceLock();
+            $maintenanceLock->acquireExclusive();
+
             $root = $cache->root();
             if (!is_dir($root)) {
                 $output->writeln('<info>Cache is already empty.</info>');
@@ -51,6 +57,10 @@ final class CacheClearCommand extends Command
         } catch (CacheException $exception) {
             $output->writeln(sprintf('<error>%s</error>', $exception->formattedMessage()));
             return $exception->exitCode;
+        } finally {
+            if ($maintenanceLock instanceof GitCacheOperationLock) {
+                $maintenanceLock->release();
+            }
         }
     }
 
