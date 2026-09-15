@@ -3,8 +3,8 @@
 /**
  * @file BuildCommand.php
  * @path src/Command/BuildCommand.php
- * @version 1.10.0
- * @date 2026-09-11
+ * @version 1.11.0
+ * @date 2026-09-15
  * @author Walter Torres
  * @copyright Copyright 2026, Walter Torres.
  * @license Proprietary
@@ -26,6 +26,7 @@ use SourceSlate\Configuration\ConfigurationLoader;
 use SourceSlate\Exception\OutputException;
 use SourceSlate\Exception\SourceSlateException;
 use SourceSlate\Exception\ValidationException;
+use SourceSlate\Model\FileDocumentation;
 use SourceSlate\Parser\PhpSourceParser;
 use SourceSlate\Renderer\HtmlRenderer;
 use SourceSlate\Source\Git\GitCache;
@@ -33,6 +34,7 @@ use SourceSlate\Source\Git\GitClient;
 use SourceSlate\Source\Git\GitSourceProvider;
 use SourceSlate\Source\SourceRequest;
 use SourceSlate\Source\SourceResolver;
+use SourceSlate\SourceHeader\SourceHeaderUpdater;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -62,7 +64,7 @@ final class BuildCommand extends Command
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Resolve source/configuration and report the planned build without rendering or publishing.')
             ->addOption('json', null, InputOption::VALUE_NONE, 'Emit machine-readable JSON output.')
             ->addOption('ci', null, InputOption::VALUE_NONE, 'Use deterministic non-interactive CI behavior.')
-            ->addOption('update-source', null, InputOption::VALUE_NONE, 'Update source headers with @sourceslate links when supported.')
+            ->addOption('update-source', null, InputOption::VALUE_NONE, 'Update local source headers with @sourceslate links.')
             ->addOption('check', null, InputOption::VALUE_NONE, 'Render in staging and fail if published documentation differs.');
     }
 
@@ -95,14 +97,10 @@ final class BuildCommand extends Command
 
             $configPath = $input->getOption('config') !== null ? (string) $input->getOption('config') : null;
             $config = (new ConfigurationLoader())->load($root, $configPath);
+            $updateSource = (bool) $input->getOption('update-source') || $config->updateSource;
 
-            if ((bool) $input->getOption('update-source')) {
-                if ($workspace->remote) {
-                    throw new SourceSlateException('SS-SRC-0010', '--update-source is not permitted for remote Git sources.', 31);
-                }
-                if (!$json) {
-                    $output->writeln('<comment>Source-header mutation is reserved by the 1.0 contract but is not enabled in this foundation build.</comment>');
-                }
+            if ($updateSource && $workspace->remote) {
+                throw new SourceSlateException('SS-SRC-0010', '--update-source is not permitted for remote Git sources.', 31);
             }
 
             $outputDirectory = $request->output !== null
@@ -113,12 +111,25 @@ final class BuildCommand extends Command
                 $this->assertRemoteOutputSafety($outputDirectory, $root, $cache->root());
             }
 
+            $parser = new PhpSourceParser();
+            $sourceHeaderChanges = 0;
+
             if ((bool) $input->getOption('dry-run')) {
-                $this->emitDryRun($output, $json, $workspace, $configPath, $config, $outputDirectory);
+                if ($updateSource) {
+                    $project = $parser->parse($root, $config);
+                    $sourceHeaderChanges = $this->updateSourceHeaders($root, $outputDirectory, $project->files, false);
+                }
+                $this->emitDryRun($output, $json, $workspace, $configPath, $config, $outputDirectory, $sourceHeaderChanges);
                 return Command::SUCCESS;
             }
 
-            $project = (new PhpSourceParser())->parse($root, $config);
+            $project = $parser->parse($root, $config);
+            if ($updateSource) {
+                $sourceHeaderChanges = $this->updateSourceHeaders($root, $outputDirectory, $project->files, true);
+                if ($sourceHeaderChanges > 0) {
+                    $project = $parser->parse($root, $config);
+                }
+            }
 
             if ((bool) $input->getOption('check')) {
                 $staging = new BuildStagingArea($outputDirectory);
@@ -135,6 +146,7 @@ final class BuildCommand extends Command
                             'message' => 'Published documentation is stale.',
                             'exit_code' => 50,
                             'differences' => $comparison,
+                            'source_headers_updated' => $sourceHeaderChanges,
                         ]);
                         return 50;
                     }
@@ -148,8 +160,16 @@ final class BuildCommand extends Command
                 }
 
                 if ($json) {
-                    $this->writeJson($output, ['status' => 'success', 'mode' => 'check', 'documentation' => ['up_to_date' => true]]);
+                    $this->writeJson($output, [
+                        'status' => 'success',
+                        'mode' => 'check',
+                        'documentation' => ['up_to_date' => true],
+                        'source_headers_updated' => $sourceHeaderChanges,
+                    ]);
                 } else {
+                    if ($sourceHeaderChanges > 0) {
+                        $output->writeln(sprintf('<info>Updated %d source header(s).</info>', $sourceHeaderChanges));
+                    }
                     $output->writeln('<info>Documentation is up to date.</info>');
                 }
 
@@ -181,6 +201,7 @@ final class BuildCommand extends Command
                         'files_scanned' => count($project->files),
                         'output' => $outputDirectory,
                     ],
+                    'source_headers_updated' => $sourceHeaderChanges,
                 ]);
             } else {
                 if ($workspace->remote) {
@@ -190,6 +211,10 @@ final class BuildCommand extends Command
                         $workspace->resolvedCommit,
                         $workspace->cacheStatus ?? 'unknown',
                     ));
+                }
+
+                if ($sourceHeaderChanges > 0) {
+                    $output->writeln(sprintf('<info>Updated %d source header(s).</info>', $sourceHeaderChanges));
                 }
 
                 $output->writeln(sprintf(
@@ -259,7 +284,98 @@ final class BuildCommand extends Command
         return 60;
     }
 
-    private function emitDryRun(OutputInterface $output, bool $json, object $workspace, ?string $configPath, object $config, string $outputDirectory): void
+    /** @param list<FileDocumentation> $files */
+    private function updateSourceHeaders(string $root, string $outputDirectory, array $files, bool $write): int
+    {
+        $updater = new SourceHeaderUpdater();
+        $changes = 0;
+        $prefix = $this->documentationPrefix($root, $outputDirectory);
+
+        foreach ($files as $file) {
+            $path = rtrim($root, '\\/') . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $file->path);
+            $source = file_get_contents($path);
+            if ($source === false) {
+                throw new SourceSlateException('SS-SRC-0013', sprintf('Unable to read source file for header update: %s', $file->path), 13);
+            }
+
+            $documentationPath = $prefix . $this->documentationPathForFile($file);
+            $updated = $updater->update($source, $documentationPath);
+            if ($updated === $source) {
+                continue;
+            }
+
+            ++$changes;
+            if ($write) {
+                $this->writeSourceAtomically($path, $updated);
+            }
+        }
+
+        return $changes;
+    }
+
+    private function documentationPathForFile(FileDocumentation $file): string
+    {
+        if ($file->types !== []) {
+            $type = $file->types[0];
+            $directory = match ($type->kind) {
+                'interface' => 'interfaces',
+                'trait' => 'traits',
+                'enum' => 'enums',
+                default => 'classes',
+            };
+            return $directory . '/' . str_replace('\\', '/', $type->fullyQualifiedName) . '.html';
+        }
+
+        return 'source/' . str_replace('\\', '/', $file->path) . '.html';
+    }
+
+    private function documentationPrefix(string $root, string $outputDirectory): string
+    {
+        $rootPath = rtrim(str_replace('\\', '/', realpath($root) ?: $root), '/');
+        $outputPath = rtrim(str_replace('\\', '/', realpath($outputDirectory) ?: $outputDirectory), '/');
+
+        if ($outputPath === $rootPath) {
+            return '';
+        }
+        if (str_starts_with($outputPath . '/', $rootPath . '/')) {
+            return trim(substr($outputPath, strlen($rootPath)), '/') . '/';
+        }
+
+        return $outputPath . '/';
+    }
+
+    private function writeSourceAtomically(string $path, string $contents): void
+    {
+        $temporary = $path . '.sourceslate-' . bin2hex(random_bytes(5));
+        $backup = $path . '.sourceslate-backup-' . bin2hex(random_bytes(5));
+        $permissions = fileperms($path);
+
+        try {
+            if (file_put_contents($temporary, $contents, LOCK_EX) === false) {
+                throw new SourceSlateException('SS-SRC-0014', sprintf('Unable to write temporary source update: %s', $path), 14);
+            }
+            if ($permissions !== false) {
+                @chmod($temporary, $permissions & 0777);
+            }
+            if (!rename($path, $backup)) {
+                throw new SourceSlateException('SS-SRC-0014', sprintf('Unable to preserve source before update: %s', $path), 14);
+            }
+            if (!rename($temporary, $path)) {
+                @rename($backup, $path);
+                throw new SourceSlateException('SS-SRC-0014', sprintf('Unable to publish source header update: %s', $path), 14);
+            }
+            @unlink($backup);
+        } finally {
+            if (is_file($temporary)) {
+                @unlink($temporary);
+            }
+            if (is_file($backup) && !is_file($path)) {
+                @rename($backup, $path);
+            }
+        }
+    }
+
+    private function emitDryRun(OutputInterface $output, bool $json, object $workspace, ?string $configPath, object $config, string $outputDirectory, int $sourceHeaderChanges = 0): void
     {
         $plan = [
             'status' => 'success',
@@ -282,6 +398,7 @@ final class BuildCommand extends Command
                 'exclude_paths' => $config->excludePaths,
             ],
             'output' => ['path' => $outputDirectory],
+            'source_headers' => ['changes' => $sourceHeaderChanges, 'write' => false],
         ];
 
         if ($json) {
@@ -302,6 +419,9 @@ final class BuildCommand extends Command
         }
         $output->writeln(sprintf('Project: %s', $config->projectName));
         $output->writeln(sprintf('Output: %s', $outputDirectory));
+        if ($sourceHeaderChanges > 0) {
+            $output->writeln(sprintf('Source headers: %d change(s) would be written.', $sourceHeaderChanges));
+        }
     }
 
     private function writeJson(OutputInterface $output, array $data): void
