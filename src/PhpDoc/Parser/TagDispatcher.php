@@ -3,8 +3,8 @@
 /**
  * @file TagDispatcher.php
  * @path src/PhpDoc/Parser/TagDispatcher.php
- * @version 1.0.0
- * @date 2026-05-20
+ * @version 1.1.0
+ * @date 2026-09-15
  * @author Walter Torres
  * @copyright Copyright 2026, Walter Torres.
  * @license Proprietary
@@ -23,21 +23,14 @@ use SourceSlate\PhpDoc\Model\TagDocumentation;
 use SourceSlate\PhpDoc\Tag\ParamTagHandler;
 use SourceSlate\PhpDoc\Tag\ReturnTagHandler;
 use SourceSlate\PhpDoc\Tag\SourceSlateTagHandler;
+use SourceSlate\PhpDoc\Tag\StandardTagHandler;
 use SourceSlate\PhpDoc\Tag\TagHandlerInterface;
 use SourceSlate\PhpDoc\Tag\ThrowsTagHandler;
 use SourceSlate\PhpDoc\Tag\UnknownTagHandler;
 
-/**
- * Selects exactly one semantic handler for each parsed PHPDoc tag.
- *
- * Registered handlers are evaluated in constructor order. The fallback handler
- * always preserves unsupported tags and therefore prevents metadata loss.
- */
 final readonly class TagDispatcher
 {
-    /**
-     * @param list<TagHandlerInterface> $handlers Semantic handlers in precedence order.
-     */
+    /** @param list<TagHandlerInterface> $handlers */
     public function __construct(
         private array $handlers,
         private TagHandlerInterface $fallback,
@@ -52,6 +45,7 @@ final readonly class TagDispatcher
                 new ReturnTagHandler(),
                 new ThrowsTagHandler(),
                 new SourceSlateTagHandler(),
+                new StandardTagHandler(),
             ],
             new UnknownTagHandler(),
         );
@@ -60,13 +54,11 @@ final readonly class TagDispatcher
     public function dispatch(PhpDocTagNode $tag): TagDocumentation
     {
         $tagName = ltrim($tag->name, '@');
-
         foreach ($this->handlers as $handler) {
             if ($handler->supports($tagName)) {
                 return $handler->handle($tagName, $tag);
             }
         }
-
         return $this->fallback->handle($tagName, $tag);
     }
 }
