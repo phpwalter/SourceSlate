@@ -96,10 +96,10 @@ final class SymbolIndex
         $key = strtolower($reference->qualifiedName);
         $this->byName[$key][] = $reference;
 
-        $withoutCall = str_ends_with($reference->qualifiedName, '()')
-            ? substr($reference->qualifiedName, 0, -2)
-            : $reference->qualifiedName;
-        $this->byName[strtolower($withoutCall)][] = $reference;
+        if (str_ends_with($reference->qualifiedName, '()')) {
+            $withoutCall = substr($reference->qualifiedName, 0, -2);
+            $this->byName[strtolower($withoutCall)][] = $reference;
+        }
     }
 
     private function addAlias(string $alias, string $qualifiedName): void
