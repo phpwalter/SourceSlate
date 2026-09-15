@@ -23,6 +23,7 @@ $commands = [
     'cache:verify',
     'cache:repair',
     'cache:prune',
+    'cache:clean',
     'cache:clear',
 ];
 
