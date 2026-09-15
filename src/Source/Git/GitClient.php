@@ -18,7 +18,7 @@ final class GitClient
     /** @param list<string> $arguments @param array<string,string> $environment */
     public function run(array $arguments, ?string $cwd = null, array $environment = []): string
     {
-        $command = array_merge(['git'], $arguments);
+        $command = array_merge(['git', '-c', 'core.longpaths=true'], $arguments);
         $escaped = array_map('escapeshellarg', $command);
         $descriptorSpec = [
             1 => ['pipe', 'w'],

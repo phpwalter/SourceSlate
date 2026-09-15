@@ -38,13 +38,10 @@ final class DoctorCommand extends Command
 
         $cache = GitCache::default();
         $cacheRoot = $cache->root();
-        $cacheParent = dirname($cacheRoot);
-        $cacheWritable = is_dir($cacheRoot) ? is_writable($cacheRoot) : is_writable($cacheParent);
-        $checks[] = $this->check('cache', $cacheWritable, $cacheRoot, 'SS-DOC-1005');
+        $checks[] = $this->check('cache', $this->pathIsWritableOrCreatable($cacheRoot), $cacheRoot, 'SS-DOC-1005');
 
         $lockRoot = $cacheRoot . '.locks';
-        $lockWritable = is_dir($lockRoot) ? is_writable($lockRoot) : is_writable(dirname($lockRoot));
-        $checks[] = $this->check('locks', $lockWritable, $lockRoot, 'SS-DOC-1006');
+        $checks[] = $this->check('locks', $this->pathIsWritableOrCreatable($lockRoot), $lockRoot, 'SS-DOC-1006');
 
         $debris = $this->findDebris($cacheRoot);
         $checks[] = $this->check(
@@ -99,5 +96,23 @@ final class DoctorCommand extends Command
         }
         sort($debris);
         return $debris;
+    }
+
+    private function pathIsWritableOrCreatable(string $path): bool
+    {
+        if (file_exists($path)) {
+            return is_dir($path) && is_writable($path);
+        }
+
+        $ancestor = dirname($path);
+        while (!file_exists($ancestor)) {
+            $parent = dirname($ancestor);
+            if ($parent === $ancestor) {
+                return false;
+            }
+            $ancestor = $parent;
+        }
+
+        return is_dir($ancestor) && is_writable($ancestor);
     }
 }

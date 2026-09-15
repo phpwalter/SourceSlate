@@ -57,7 +57,14 @@ final readonly class GitSourceProvider
                     $cacheStatus = 'offline';
                 } else {
                     try {
-                        $this->git->run(['--git-dir=' . $bare, 'fetch', '--prune', '--tags', 'origin']);
+                        $this->git->run([
+                            '--git-dir=' . $bare,
+                            'fetch',
+                            '--prune',
+                            '--tags',
+                            'origin',
+                            '+refs/heads/*:refs/heads/*',
+                        ]);
                         $cacheStatus = $request->refresh ? 'refreshed' : 'hit';
                     } catch (GitException $exception) {
                         if ($exception->exitCode === 22) {
@@ -198,8 +205,9 @@ final readonly class GitSourceProvider
         $worktree = $this->cache->worktreeDirectory($identity, $commit);
 
         if (is_dir($worktree)) {
+            $head = strtolower(trim($this->git->run(['rev-parse', 'HEAD'], $worktree)));
             $status = $this->git->run(['status', '--porcelain'], $worktree);
-            if ($status === '') {
+            if ($head === strtolower($commit) && $status === '') {
                 return $worktree;
             }
 

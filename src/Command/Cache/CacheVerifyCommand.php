@@ -156,25 +156,27 @@ final class CacheVerifyCommand extends Command
 
     private function verifyWorktrees(string $directory, GitClient $git): int
     {
-        $root = $directory . DIRECTORY_SEPARATOR . 'worktrees';
-        if (!is_dir($root)) {
-            return 0;
-        }
-
         $count = 0;
-        foreach (array_diff(scandir($root) ?: [], ['.', '..']) as $name) {
-            $path = $root . DIRECTORY_SEPARATOR . $name;
-            if (!is_dir($path)) {
-                throw new \RuntimeException(sprintf('Unexpected non-directory worktree cache entry: %s', $path));
+        foreach (['w', 'worktrees'] as $relativeRoot) {
+            $root = $directory . DIRECTORY_SEPARATOR . $relativeRoot;
+            if (!is_dir($root)) {
+                continue;
             }
-            if (!file_exists($path . DIRECTORY_SEPARATOR . '.git')) {
-                throw new \RuntimeException(sprintf('Cached worktree is missing its .git link: %s', $path));
+
+            foreach (array_diff(scandir($root) ?: [], ['.', '..']) as $name) {
+                $path = $root . DIRECTORY_SEPARATOR . $name;
+                if (!is_dir($path)) {
+                    throw new \RuntimeException(sprintf('Unexpected non-directory worktree cache entry: %s', $path));
+                }
+                if (!file_exists($path . DIRECTORY_SEPARATOR . '.git')) {
+                    throw new \RuntimeException(sprintf('Cached worktree is missing its .git link: %s', $path));
+                }
+                $inside = strtolower(trim($git->run(['rev-parse', '--is-inside-work-tree'], $path)));
+                if ($inside !== 'true') {
+                    throw new \RuntimeException(sprintf('Cached worktree is not recognized by Git: %s', $path));
+                }
+                ++$count;
             }
-            $inside = strtolower(trim($git->run(['rev-parse', '--is-inside-work-tree'], $path)));
-            if ($inside !== 'true') {
-                throw new \RuntimeException(sprintf('Cached worktree is not recognized by Git: %s', $path));
-            }
-            ++$count;
         }
         return $count;
     }

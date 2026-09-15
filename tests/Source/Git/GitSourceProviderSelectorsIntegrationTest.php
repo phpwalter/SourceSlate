@@ -80,8 +80,8 @@ final class GitSourceProviderSelectorsIntegrationTest extends TestCase
         [$remote, $work, $git] = $this->createRemoteRepository($root);
         $git->run(['branch', 'release'], $work);
         $git->run(['tag', 'release'], $work);
-        $git->run(['push', 'origin', 'release:refs/heads/release'], $work);
-        $git->run(['push', 'origin', 'refs/tags/release'], $work);
+        $git->run(['push', 'origin', 'refs/heads/release:refs/heads/release'], $work);
+        $git->run(['push', 'origin', 'refs/tags/release:refs/tags/release'], $work);
 
         try {
             $this->expectException(GitException::class);

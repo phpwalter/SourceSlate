@@ -17,8 +17,9 @@ final class GitCacheLockTest extends TestCase
 
         try {
             $lock->acquire();
-
             self::assertFileExists($path);
+            $lock->release();
+
             $data = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
             self::assertSame(getmypid(), $data['pid']);
             self::assertArrayHasKey('hostname', $data);

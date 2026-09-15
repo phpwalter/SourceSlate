@@ -6,6 +6,8 @@ namespace SourceSlate\Source\Git;
 
 final readonly class GitCache
 {
+    private const WORKTREE_COMMIT_PREFIX_LENGTH = 24;
+
     public function __construct(private string $root)
     {
     }
@@ -91,12 +93,14 @@ final readonly class GitCache
 
     public function worktreeDirectory(GitRepositoryIdentity $identity, string $commit): string
     {
-        return $this->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'worktrees' . DIRECTORY_SEPARATOR . $commit;
+        return $this->repositoryDirectory($identity)
+            . DIRECTORY_SEPARATOR . 'w'
+            . DIRECTORY_SEPARATOR . $this->worktreeKey($commit);
     }
 
     public function alternateWorktreeDirectory(GitRepositoryIdentity $identity, string $commit): string
     {
-        return $this->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'worktrees' . DIRECTORY_SEPARATOR . $commit . '-' . bin2hex(random_bytes(4));
+        return $this->worktreeDirectory($identity, $commit) . '-' . bin2hex(random_bytes(4));
     }
 
     public function ensureRepositoryDirectory(GitRepositoryIdentity $identity): void
@@ -159,6 +163,16 @@ final readonly class GitCache
                 @unlink($temporary);
             }
         }
+    }
+
+    private function worktreeKey(string $commit): string
+    {
+        $normalized = strtolower(trim($commit));
+        if (preg_match('/^[0-9a-f]{40}$/', $normalized) !== 1) {
+            throw new \InvalidArgumentException('Worktree commit must be a full 40-character Git SHA.');
+        }
+
+        return substr($normalized, 0, self::WORKTREE_COMMIT_PREFIX_LENGTH);
     }
 
     private function lockPath(GitRepositoryIdentity $identity): string

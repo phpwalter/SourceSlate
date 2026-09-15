@@ -90,7 +90,7 @@ final class Example
     public function run(): void {}
 }
 PHP);
-        return $root;
+        return realpath($root) ?: $root;
     }
 
     private function removeDirectory(string $path): void

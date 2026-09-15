@@ -68,21 +68,19 @@ final class SymbolIndex
             return null;
         }
 
-        $candidates = $this->byName[strtolower($normalized)] ?? [];
-        if (count($candidates) === 1) {
-            return $candidates[0];
-        }
-        if (count($candidates) > 1) {
-            return null;
-        }
-
         if ($contextNamespace !== null && $contextNamespace !== '' && !str_contains($normalized, '\\')) {
             $qualified = trim($contextNamespace, '\\') . '\\' . $normalized;
-            $candidates = $this->byName[strtolower($qualified)] ?? [];
-            return count($candidates) === 1 ? $candidates[0] : null;
+            $contextCandidates = $this->byName[strtolower($qualified)] ?? [];
+            if (count($contextCandidates) === 1) {
+                return $contextCandidates[0];
+            }
+            if (count($contextCandidates) > 1) {
+                return null;
+            }
         }
 
-        return null;
+        $candidates = $this->byName[strtolower($normalized)] ?? [];
+        return count($candidates) === 1 ? $candidates[0] : null;
     }
 
     /** @return list<SymbolReference> */

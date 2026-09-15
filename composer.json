@@ -40,9 +40,9 @@
   ],
   "scripts": {
     "test": "phpunit",
-    "validate": "composer validate --strict",
+    "validate-project": "composer validate --strict",
     "check": [
-      "@validate",
+      "@validate-project",
       "@test"
     ]
   },

@@ -22,7 +22,10 @@ final class GitCacheTest extends TestCase
             self::assertSame($root . DIRECTORY_SEPARATOR . $identity->cacheKey, $cache->repositoryDirectory($identity));
             self::assertSame($cache->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'repo.git', $cache->bareRepository($identity));
             self::assertSame($cache->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'metadata.json', $cache->metadataPath($identity));
-            self::assertSame($cache->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'worktrees' . DIRECTORY_SEPARATOR . $commit, $cache->worktreeDirectory($identity, $commit));
+            self::assertSame(
+                $cache->repositoryDirectory($identity) . DIRECTORY_SEPARATOR . 'w' . DIRECTORY_SEPARATOR . str_repeat('a', 24),
+                $cache->worktreeDirectory($identity, $commit),
+            );
         } finally {
             $this->removeDirectory($root);
         }
@@ -48,7 +51,7 @@ final class GitCacheTest extends TestCase
     {
         $root = $this->temporaryDirectory();
         $cache = new GitCache($root);
-        $identity = GitRepositoryIdentity::fromUrl('https://github.com/acme/example.git');
+        $identity = GitRepositoryIdentity::fromUrl('git@github.com:acme/example.git');
         $metadata = new GitCacheMetadata(
             identity: $identity,
             lastResolvedRef: 'refs/heads/main',
@@ -142,6 +145,15 @@ final class GitCacheTest extends TestCase
         } finally {
             $this->removeDirectory($root);
         }
+    }
+
+    public function testWorktreePathRequiresFullCommitSha(): void
+    {
+        $cache = new GitCache($this->temporaryDirectory());
+        $identity = GitRepositoryIdentity::fromUrl('https://github.com/acme/example.git');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $cache->worktreeDirectory($identity, 'abc1234');
     }
 
     private function temporaryDirectory(): string

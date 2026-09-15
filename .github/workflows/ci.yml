@@ -36,7 +36,7 @@ jobs:
         run: php bin/sourceslate doctor --json
 
       - name: Build SourceSlate documentation
-        run: php bin/sourceslate build . --config=sourceslate.example.yaml
+        run: php bin/sourceslate build . --config=sourceslate.example.yaml --output=.sourceslate-ci-docs
 
       - name: Verify deterministic documentation
-        run: php bin/sourceslate build . --config=sourceslate.example.yaml --check
+        run: php bin/sourceslate build . --config=sourceslate.example.yaml --output=.sourceslate-ci-docs --check
