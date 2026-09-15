@@ -6,6 +6,11 @@ namespace SourceSlate\Build;
 
 final readonly class DocumentationComparator
 {
+    private const INTERNAL_FILES = [
+        '.sourceslate-manifest.json',
+        '.sourceslate-staging-owner.json',
+    ];
+
     public function compare(string $expectedDirectory, string $actualDirectory): array
     {
         $expected = $this->hashTree($expectedDirectory);
@@ -45,7 +50,7 @@ final readonly class DocumentationComparator
         );
 
         foreach ($iterator as $file) {
-            if (!$file->isFile() || $file->getFilename() === '.sourceslate-manifest.json') {
+            if (!$file->isFile() || in_array($file->getFilename(), self::INTERNAL_FILES, true)) {
                 continue;
             }
 
