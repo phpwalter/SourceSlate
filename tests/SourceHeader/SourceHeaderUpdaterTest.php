@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SourceSlate\Tests\SourceHeader;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SourceSlate\SourceHeader\SourceHeaderUpdater;
 
@@ -44,6 +45,23 @@ final class SourceHeaderUpdaterTest extends TestCase
         $updated = (new SourceHeaderUpdater())->update($source, 'docs\\classes\\Example.html');
 
         self::assertStringContainsString('@sourceslate docs/classes/Example.html', $updated);
+    }
+
+    #[DataProvider('unsafeDocumentationPaths')]
+    public function testRejectsNonPortableDocumentationPath(string $path): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        (new SourceHeaderUpdater())->update("<?php\nfinal class Example {}\n", $path);
+    }
+
+    /** @return iterable<string,array{0:string}> */
+    public static function unsafeDocumentationPaths(): iterable
+    {
+        yield 'unix absolute' => ['/tmp/docs/Example.html'];
+        yield 'windows absolute' => ['C:\\docs\\Example.html'];
+        yield 'uri' => ['file:///tmp/docs/Example.html'];
+        yield 'parent traversal' => ['../docs/Example.html'];
+        yield 'nested traversal' => ['docs/../outside/Example.html'];
     }
 
     public function testRejectsNonPhpSource(): void

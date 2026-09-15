@@ -3,7 +3,7 @@
 /**
  * @file BuildCommand.php
  * @path src/Command/BuildCommand.php
- * @version 1.11.0
+ * @version 1.12.0
  * @date 2026-09-15
  * @author Walter Torres
  * @copyright Copyright 2026, Walter Torres.
@@ -109,6 +109,10 @@ final class BuildCommand extends Command
 
             if ($workspace->remote) {
                 $this->assertRemoteOutputSafety($outputDirectory, $root, $cache->root());
+            }
+
+            if ($updateSource) {
+                $this->documentationPrefix($root, $outputDirectory);
             }
 
             $parser = new PhpSourceParser();
@@ -341,7 +345,11 @@ final class BuildCommand extends Command
             return trim(substr($outputPath, strlen($rootPath)), '/') . '/';
         }
 
-        return $outputPath . '/';
+        throw new SourceSlateException(
+            'SS-SRC-0015',
+            '--update-source requires documentation output to be inside the local project so @sourceslate links remain portable and do not expose host filesystem paths.',
+            15,
+        );
     }
 
     private function writeSourceAtomically(string $path, string $contents): void
@@ -369,13 +377,10 @@ final class BuildCommand extends Command
             if (is_file($temporary)) {
                 @unlink($temporary);
             }
-            if (is_file($backup) && !is_file($path)) {
-                @rename($backup, $path);
-            }
         }
     }
 
-    private function emitDryRun(OutputInterface $output, bool $json, object $workspace, ?string $configPath, object $config, string $outputDirectory, int $sourceHeaderChanges = 0): void
+    private function emitDryRun(OutputInterface $output, bool $json, object $workspace, ?string $configPath, object $config, string $outputDirectory, int $sourceHeaderChanges): void
     {
         $plan = [
             'status' => 'success',
@@ -398,7 +403,10 @@ final class BuildCommand extends Command
                 'exclude_paths' => $config->excludePaths,
             ],
             'output' => ['path' => $outputDirectory],
-            'source_headers' => ['changes' => $sourceHeaderChanges, 'write' => false],
+            'source_headers' => [
+                'changes' => $sourceHeaderChanges,
+                'write' => false,
+            ],
         ];
 
         if ($json) {
@@ -420,7 +428,7 @@ final class BuildCommand extends Command
         $output->writeln(sprintf('Project: %s', $config->projectName));
         $output->writeln(sprintf('Output: %s', $outputDirectory));
         if ($sourceHeaderChanges > 0) {
-            $output->writeln(sprintf('Source headers: %d change(s) would be written.', $sourceHeaderChanges));
+            $output->writeln(sprintf('Source headers: %d would change', $sourceHeaderChanges));
         }
     }
 
