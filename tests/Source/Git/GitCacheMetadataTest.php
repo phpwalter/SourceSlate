@@ -47,6 +47,39 @@ final class GitCacheMetadataTest extends TestCase
         self::assertSame($original->lastUsedAt, $restored->lastUsedAt);
     }
 
+    public function testLegacyUnversionedMetadataMigratesInMemory(): void
+    {
+        $identity = GitRepositoryIdentity::fromUrl('https://github.com/acme/example.git');
+        $legacy = [
+            'repository' => [
+                'canonical_url' => $identity->canonicalUrl,
+                'cache_key' => $identity->cacheKey,
+            ],
+            'state' => [
+                'created_at' => '2026-01-01T00:00:00+00:00',
+                'last_used_at' => '2026-01-02T00:00:00+00:00',
+                'last_resolved_ref' => 'refs/heads/main',
+                'last_resolved_commit' => str_repeat('a', 40),
+            ],
+        ];
+
+        self::assertTrue(GitCacheMetadata::isLegacy($legacy));
+        self::assertSame(0, GitCacheMetadata::schemaVersion($legacy));
+
+        $metadata = GitCacheMetadata::fromArray($identity, $legacy);
+        self::assertSame('refs/heads/main', $metadata->lastResolvedRef);
+        self::assertSame(str_repeat('a', 40), $metadata->lastResolvedCommit);
+        self::assertSame(GitCacheMetadata::SCHEMA_VERSION, $metadata->toArray()['schema_version']);
+    }
+
+    public function testLegacyMetadataWithoutRequiredShapeIsRejected(): void
+    {
+        $identity = GitRepositoryIdentity::fromUrl('https://github.com/acme/example.git');
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Legacy SourceSlate Git cache metadata is missing repository or state data.');
+        GitCacheMetadata::fromArray($identity, ['repository' => []]);
+    }
+
     public function testResolutionUpdatesReferenceCommitAndUsageWithoutFetchTimestampWhenCacheWasUsed(): void
     {
         $identity = GitRepositoryIdentity::fromUrl('https://github.com/acme/example.git');

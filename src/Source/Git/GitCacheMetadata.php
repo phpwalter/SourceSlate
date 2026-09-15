@@ -21,24 +21,12 @@ final readonly class GitCacheMetadata
     public static function create(GitRepositoryIdentity $identity): self
     {
         $now = gmdate('c');
-
-        return new self(
-            identity: $identity,
-            createdAt: $now,
-            lastUsedAt: $now,
-        );
+        return new self(identity: $identity, createdAt: $now, lastUsedAt: $now);
     }
 
     public static function fromArray(GitRepositoryIdentity $identity, array $data): self
     {
-        $schemaVersion = $data['schema_version'] ?? null;
-        if ($schemaVersion !== self::SCHEMA_VERSION) {
-            throw new \RuntimeException(sprintf(
-                'Unsupported SourceSlate Git cache metadata schema: %s',
-                is_scalar($schemaVersion) ? (string) $schemaVersion : 'unknown',
-            ));
-        }
-
+        $data = self::migrateArray($data);
         $state = is_array($data['state'] ?? null) ? $data['state'] : [];
 
         return new self(
@@ -51,10 +39,38 @@ final readonly class GitCacheMetadata
         );
     }
 
+    public static function schemaVersion(array $data): int
+    {
+        $version = $data['schema_version'] ?? 0;
+        return is_int($version) ? $version : (is_numeric($version) ? (int) $version : -1);
+    }
+
+    public static function isLegacy(array $data): bool
+    {
+        return self::schemaVersion($data) === 0;
+    }
+
+    public static function migrateArray(array $data): array
+    {
+        $schemaVersion = self::schemaVersion($data);
+        if ($schemaVersion === self::SCHEMA_VERSION) {
+            return $data;
+        }
+
+        if ($schemaVersion === 0) {
+            if (!is_array($data['repository'] ?? null) || !is_array($data['state'] ?? null)) {
+                throw new \RuntimeException('Legacy SourceSlate Git cache metadata is missing repository or state data.');
+            }
+            $data['schema_version'] = self::SCHEMA_VERSION;
+            return $data;
+        }
+
+        throw new \RuntimeException(sprintf('Unsupported SourceSlate Git cache metadata schema: %s', $schemaVersion >= 0 ? (string) $schemaVersion : 'unknown'));
+    }
+
     public function withResolution(string $ref, string $commit, bool $fetched): self
     {
         $now = gmdate('c');
-
         return new self(
             identity: $this->identity,
             lastResolvedRef: $ref,
