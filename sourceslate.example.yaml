@@ -11,17 +11,5 @@ source:
 output:
   path: docs
 
-repository:
-  auto_detect: true
-
 source_headers:
   update: false
-  tag: sourceslate
-
-search:
-  enabled: true
-
-theme:
-  name: material
-  mode: auto
-  custom_css: null
