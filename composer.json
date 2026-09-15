@@ -1,8 +1,20 @@
 {
   "name": "phpwalter/sourceslate",
-  "description": "A modern static documentation generator for PHP source code and PHPDoc.",
-  "type": "project",
+  "description": "A deterministic static documentation generator for PHP source code and PHPDoc.",
+  "type": "library",
   "license": "proprietary",
+  "keywords": [
+    "documentation",
+    "phpdoc",
+    "static-analysis",
+    "api-documentation",
+    "developer-tools"
+  ],
+  "homepage": "https://github.com/phpwalter/SourceSlate",
+  "support": {
+    "issues": "https://github.com/phpwalter/SourceSlate/issues",
+    "source": "https://github.com/phpwalter/SourceSlate"
+  },
   "require": {
     "php": "^8.3",
     "nikic/php-parser": "^5.1",
@@ -28,8 +40,18 @@
   ],
   "scripts": {
     "test": "phpunit",
+    "validate": "composer validate --strict",
     "check": [
+      "@validate",
       "@test"
+    ]
+  },
+  "archive": {
+    "exclude": [
+      "/.github",
+      "/tests",
+      "/docs",
+      "/.gitignore"
     ]
   },
   "config": {
