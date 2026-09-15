@@ -1,19 +1,5 @@
 <?php
 
-/**
- * @file HtmlRendererTest.php
- * @path tests/Renderer/HtmlRendererTest.php
- * @version 1.0.0
- * @date 2026-09-02
- * @author Walter Torres
- * @copyright Copyright 2026, Walter Torres.
- * @license Proprietary
- * @maintainer SourceSlate Team
- * @status dev
- *
- * Verifies generation of interconnected type, namespace, source, and search artifacts.
- */
-
 declare(strict_types=1);
 
 namespace SourceSlate\Tests\Renderer;
@@ -46,18 +32,45 @@ final class HtmlRendererTest extends TestCase
             new FileDocumentation('src/Example.php', ['Demo\\Example'], null, null, [$type], "<?php\nclass Example {}\n"),
         ]);
 
-        (new HtmlRenderer())->render($project, $root);
+        try {
+            (new HtmlRenderer())->render($project, $root);
 
-        self::assertFileExists($root . '/index.html');
-        self::assertFileExists($root . '/classes/Demo/Example.html');
-        self::assertFileExists($root . '/namespaces/Demo.html');
-        self::assertFileExists($root . '/source/src/Example.php.html');
-        self::assertFileExists($root . '/assets/search-index.json');
-        self::assertFileExists($root . '/assets/search-index.js');
-        self::assertFileExists($root . '/assets/sourceslate.js');
+            self::assertFileExists($root . '/index.html');
+            self::assertFileExists($root . '/classes/Demo/Example.html');
+            self::assertFileExists($root . '/namespaces/Demo.html');
+            self::assertFileExists($root . '/source/src/Example.php.html');
+            self::assertFileExists($root . '/assets/search-index.json');
+            self::assertFileExists($root . '/assets/search-index.js');
+            self::assertFileExists($root . '/assets/sourceslate.js');
 
-        $index = file_get_contents($root . '/index.html');
-        self::assertIsString($index);
-        self::assertStringContainsString('Demo\\Example', $index);
+            $index = (string) file_get_contents($root . '/index.html');
+            self::assertStringContainsString('Demo\\Example', $index);
+            self::assertStringContainsString('role="listbox"', $index);
+
+            $javascript = (string) file_get_contents($root . '/assets/sourceslate.js');
+            self::assertStringNotContainsString('innerHTML', $javascript);
+            self::assertStringContainsString('textContent', $javascript);
+            self::assertStringContainsString('ArrowDown', $javascript);
+            self::assertStringContainsString('Escape', $javascript);
+        } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
+    private function removeDirectory(string $path): void
+    {
+        if (!is_dir($path)) {
+            @unlink($path);
+            return;
+        }
+        foreach (array_diff(scandir($path) ?: [], ['.', '..']) as $entry) {
+            $child = $path . DIRECTORY_SEPARATOR . $entry;
+            if (is_dir($child) && !is_link($child)) {
+                $this->removeDirectory($child);
+            } else {
+                @unlink($child);
+            }
+        }
+        @rmdir($path);
     }
 }
