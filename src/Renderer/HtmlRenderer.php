@@ -209,7 +209,85 @@ final class HtmlRenderer implements RendererInterface
         if (!copy($themePath, $assets . DIRECTORY_SEPARATOR . 'material.css')) {
             throw new RuntimeException('Unable to copy the Material Design 3 theme.');
         }
-        $this->write($assets . DIRECTORY_SEPARATOR . 'sourceslate.js', "(() => { const input=document.querySelector('[data-sourceslate-search]'); const results=document.querySelector('[data-search-results]'); if(!input||!results||!Array.isArray(window.SOURCE_SLATE_SEARCH_INDEX))return; input.addEventListener('input',()=>{ const q=input.value.trim().toLowerCase(); if(q.length<2){results.hidden=true;results.innerHTML='';return;} const m=window.SOURCE_SLATE_SEARCH_INDEX.filter(i=>[i.qualifiedName,i.summary].filter(Boolean).join(' ').toLowerCase().includes(q)).slice(0,20); results.innerHTML=m.map(i=>`<a href=\"${i.url}\"><strong>${i.qualifiedName}</strong><span>${i.kind}</span></a>`).join(''); results.hidden=m.length===0; }); })();\n");
+
+        $script = <<<'JS'
+(() => {
+  const input = document.querySelector('[data-sourceslate-search]');
+  const results = document.querySelector('[data-search-results]');
+  const index = window.SOURCE_SLATE_SEARCH_INDEX;
+  if (!input || !results || !Array.isArray(index)) return;
+
+  let matches = [];
+  let active = -1;
+
+  const clear = () => {
+    results.replaceChildren();
+    results.hidden = true;
+    active = -1;
+    matches = [];
+    input.setAttribute('aria-expanded', 'false');
+  };
+
+  const render = () => {
+    results.replaceChildren();
+    matches.forEach((item, position) => {
+      const link = document.createElement('a');
+      link.href = String(item.url || '#');
+      link.setAttribute('role', 'option');
+      link.setAttribute('aria-selected', position === active ? 'true' : 'false');
+
+      const name = document.createElement('strong');
+      name.textContent = String(item.qualifiedName || '');
+      const kind = document.createElement('span');
+      kind.textContent = String(item.kind || '');
+      link.append(name, kind);
+      results.append(link);
+    });
+    results.hidden = matches.length === 0;
+    input.setAttribute('aria-expanded', matches.length > 0 ? 'true' : 'false');
+  };
+
+  input.addEventListener('input', () => {
+    const query = input.value.trim().toLowerCase();
+    if (query.length < 2) {
+      clear();
+      return;
+    }
+    matches = index
+      .filter(item => [item.qualifiedName, item.summary, item.kind]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(query))
+      .slice(0, 20);
+    active = matches.length > 0 ? 0 : -1;
+    render();
+  });
+
+  input.addEventListener('keydown', event => {
+    if (matches.length === 0) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      active = (active + 1) % matches.length;
+      render();
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      active = (active - 1 + matches.length) % matches.length;
+      render();
+    } else if (event.key === 'Enter' && active >= 0) {
+      event.preventDefault();
+      window.location.assign(String(matches[active].url));
+    } else if (event.key === 'Escape') {
+      clear();
+    }
+  });
+
+  document.addEventListener('click', event => {
+    if (!results.contains(event.target) && event.target !== input) clear();
+  });
+})();
+JS;
+        $this->write($assets . DIRECTORY_SEPARATOR . 'sourceslate.js', $script . PHP_EOL);
     }
 
     private function methodRow(MethodDocumentation $method, TypeDocumentation $type): string
@@ -243,7 +321,7 @@ final class HtmlRenderer implements RendererInterface
 
     private function page(string $title, ProjectDocumentation $project, string $body, string $prefix): string
     {
-        return sprintf('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s — SourceSlate</title><link rel="stylesheet" href="%sassets/material.css"></head><body><header class="topbar"><a class="brand" href="%sindex.html">SourceSlate</a><span class="project-name">%s</span><div class="search-shell"><input data-sourceslate-search type="search" placeholder="Search documentation"><div class="search-results" data-search-results hidden></div></div></header><main class="layout"><aside class="sidebar"><nav><a href="%sindex.html">Overview</a><a href="%sfunctions/index.html">Functions</a></nav></aside><article class="content">%s</article></main><script src="%sassets/search-index.js"></script><script src="%sassets/sourceslate.js"></script></body></html>', $this->escape($title), $prefix, $prefix, $this->escape($project->name), $prefix, $prefix, $body, $prefix, $prefix);
+        return sprintf('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s — SourceSlate</title><link rel="stylesheet" href="%sassets/material.css"></head><body><header class="topbar"><a class="brand" href="%sindex.html">SourceSlate</a><span class="project-name">%s</span><div class="search-shell"><input data-sourceslate-search type="search" aria-label="Search documentation" aria-expanded="false" aria-controls="sourceslate-search-results" autocomplete="off" placeholder="Search documentation"><div id="sourceslate-search-results" class="search-results" data-search-results role="listbox" hidden></div></div></header><main class="layout"><aside class="sidebar"><nav><a href="%sindex.html">Overview</a><a href="%sfunctions/index.html">Functions</a></nav></aside><article class="content">%s</article></main><script src="%sassets/search-index.js"></script><script src="%sassets/sourceslate.js"></script></body></html>', $this->escape($title), $prefix, $prefix, $this->escape($project->name), $prefix, $prefix, $body, $prefix, $prefix);
     }
 
     private function typePath(TypeDocumentation $type): string
