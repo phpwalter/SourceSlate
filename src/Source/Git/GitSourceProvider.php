@@ -205,8 +205,9 @@ final readonly class GitSourceProvider
         $worktree = $this->cache->worktreeDirectory($identity, $commit);
 
         if (is_dir($worktree)) {
+            $head = strtolower(trim($this->git->run(['rev-parse', 'HEAD'], $worktree)));
             $status = $this->git->run(['status', '--porcelain'], $worktree);
-            if ($status === '') {
+            if ($head === strtolower($commit) && $status === '') {
                 return $worktree;
             }
 
