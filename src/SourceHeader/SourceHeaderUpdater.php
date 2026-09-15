@@ -19,21 +19,28 @@ final class SourceHeaderUpdater
             return preg_replace('/@sourceslate\s+[^\r\n*]+/', $tagLine, $source, 1) ?? $source;
         }
 
-        if (preg_match('/<\?php\s*\R\s*\/\*\*/', $source) === 1) {
-            return preg_replace('/(<\?php\s*\R\s*\/\*\*)(\s*)/', "$1\n * {$tagLine}\n */$2", $source, 1) ?? $source;
-        }
-
-        if (preg_match('/<\?php\s*\R\s*\/\*\*/', $source) !== 1 && preg_match('/<\?php\s*\R\s*\/\*\*/', $source) === 0) {
-            if (preg_match('/<\?php\s*\R\s*(\/\*\*.*?\*\/)/s', $source, $matches) === 1) {
-                $docblock = $matches[1];
-                $replacement = preg_replace('/\*\/$/', " * {$tagLine}\n */", $docblock, 1) ?? $docblock;
-                return preg_replace('/' . preg_quote($docblock, '/') . '/', str_replace('\\', '\\\\', $replacement), $source, 1) ?? $source;
+        if (preg_match('/<\?php\s*\R\s*(\/\*\*.*?\*\/)/s', $source, $matches, PREG_OFFSET_CAPTURE) === 1) {
+            $docblock = $matches[1][0];
+            $offset = $matches[1][1];
+            $end = strrpos($docblock, '*/');
+            if ($end === false) {
+                throw new \RuntimeException('Unable to locate the end of the PHP file docblock.');
             }
+
+            $insertion = " * {$tagLine}\n ";
+            $updatedDocblock = substr($docblock, 0, $end) . $insertion . substr($docblock, $end);
+
+            return substr($source, 0, $offset)
+                . $updatedDocblock
+                . substr($source, $offset + strlen($docblock));
         }
 
-        if (preg_match('/<\?php(\s*\R)/', $source, $matches) === 1) {
+        if (preg_match('/<\?php(\s*\R)/', $source, $matches, PREG_OFFSET_CAPTURE) === 1) {
+            $fullMatch = $matches[0][0];
+            $offset = $matches[0][1] + strlen($fullMatch);
             $header = "/**\n * {$tagLine}\n */\n";
-            return preg_replace('/<\?php(\s*\R)/', "<?php$1$header", $source, 1) ?? $source;
+
+            return substr($source, 0, $offset) . $header . substr($source, $offset);
         }
 
         throw new \InvalidArgumentException('Source does not contain a PHP opening tag.');
