@@ -28,6 +28,10 @@ final readonly class GitSourceProvider
         }
 
         $identity = GitRepositoryIdentity::fromUrl($request->source);
+        $maintenanceLock = $this->cache->maintenanceLock();
+        $operationLock = $this->cache->operationLock($identity);
+        $maintenanceLock->acquireShared();
+        $operationLock->acquireExclusive();
         $this->cache->ensureRepositoryDirectory($identity);
         $lock = $this->cache->lock($identity);
         $lock->acquire();
@@ -99,6 +103,8 @@ final readonly class GitSourceProvider
             );
         } finally {
             $lock->release();
+            $operationLock->release();
+            $maintenanceLock->release();
         }
     }
 
