@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace SourceSlate\Renderer;
 
 use RuntimeException;
-use SourceSlate\Model\FileDocumentation;
+use SourceSlate\Model\AttributeDocumentation;
 use SourceSlate\Model\FunctionDocumentation;
 use SourceSlate\Model\MethodDocumentation;
 use SourceSlate\Model\ProjectDocumentation;
+use SourceSlate\Model\SymbolIndex;
 use SourceSlate\Model\TypeDocumentation;
 use SourceSlate\PhpDoc\Model\PhpDocBlock;
 
@@ -35,11 +36,12 @@ final class HtmlRenderer implements RendererInterface
         usort($types, static fn (TypeDocumentation $a, TypeDocumentation $b): int => $a->fullyQualifiedName <=> $b->fullyQualifiedName);
         usort($functions, static fn (FunctionDocumentation $a, FunctionDocumentation $b): int => $a->fullyQualifiedName <=> $b->fullyQualifiedName);
         ksort($namespaces, SORT_STRING);
+        $symbols = SymbolIndex::fromProject($project);
 
         $this->writeIndex($project, $types, $functions, $namespaces, $outputDirectory);
         $this->writeNamespacePages($project, $namespaces, $outputDirectory);
-        $this->writeTypePages($project, $types, $outputDirectory);
-        $this->writeFunctionsPage($project, $functions, $outputDirectory);
+        $this->writeTypePages($project, $types, $symbols, $outputDirectory);
+        $this->writeFunctionsPage($project, $functions, $symbols, $outputDirectory);
         $this->writeSourcePages($project, $outputDirectory);
         $this->writeSearchIndex($types, $functions, $outputDirectory);
         $this->writeAssets($outputDirectory);
@@ -84,29 +86,59 @@ final class HtmlRenderer implements RendererInterface
     }
 
     /** @param list<TypeDocumentation> $types */
-    private function writeTypePages(ProjectDocumentation $project, array $types, string $outputDirectory): void
+    private function writeTypePages(ProjectDocumentation $project, array $types, SymbolIndex $symbols, string $outputDirectory): void
     {
         foreach ($types as $type) {
-            $sections = $this->renderMemberSections($type);
-            $body = sprintf(
-                '<p class="eyebrow">%s</p><h1><code>%s</code></h1><p class="namespace">%s</p>%s<section class="card"><h2>Declaration</h2><p><a href="%s#L%d"><code>%s:%d</code></a></p></section>%s',
-                $this->escape(ucfirst($type->kind)), $this->escape($type->name), $this->escape($type->namespace !== '' ? $type->namespace : '(global namespace)'), $this->renderPhpDoc($type->phpDoc), $this->escape($this->relativeSourceFromType($type)), $type->line, $this->escape($type->sourcePath), $type->line, $sections
-            );
             $relative = $this->typePath($type);
+            $prefix = str_repeat('../', substr_count($relative, '/'));
+            $sections = $this->renderMemberSections($type, $symbols, $prefix);
+            $relations = $this->renderRelationships($type, $symbols, $prefix);
+            $body = sprintf(
+                '<p class="eyebrow">%s</p><h1><code>%s</code></h1><p class="namespace">%s</p>%s%s%s<section class="card"><h2>Declaration</h2><p><a href="%s#L%d"><code>%s:%d</code></a></p></section>%s',
+                $this->escape(ucfirst($type->kind)),
+                $this->escape($type->name),
+                $this->escape($type->namespace !== '' ? $type->namespace : '(global namespace)'),
+                $this->renderAttributes($type->attributes),
+                $relations,
+                $this->renderPhpDoc($type->phpDoc, $symbols, $type->namespace, $prefix),
+                $this->escape($this->relativeSourceFromType($type)),
+                $type->line,
+                $this->escape($type->sourcePath),
+                $type->line,
+                $sections
+            );
             $path = $outputDirectory . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative);
             $this->mkdir(dirname($path));
-            $this->write($path, $this->page($type->fullyQualifiedName, $project, $body, str_repeat('../', substr_count($relative, '/'))));
+            $this->write($path, $this->page($type->fullyQualifiedName, $project, $body, $prefix));
         }
     }
 
-    private function renderMemberSections(TypeDocumentation $type): string
+    private function renderRelationships(TypeDocumentation $type, SymbolIndex $symbols, string $prefix): string
+    {
+        $groups = [
+            'Extends' => $type->extends,
+            'Implements' => $type->implements,
+            'Uses' => $type->traits,
+        ];
+        $rows = '';
+        foreach ($groups as $label => $references) {
+            if ($references === []) {
+                continue;
+            }
+            $links = array_map(fn (string $reference): string => $this->referenceHtml($reference, $symbols, $type->namespace, $prefix), $references);
+            $rows .= '<dt>' . $this->escape($label) . '</dt><dd>' . implode(', ', $links) . '</dd>';
+        }
+        return $rows !== '' ? '<section class="card"><h2>Relationships</h2><dl class="facts">' . $rows . '</dl></section>' : '';
+    }
+
+    private function renderMemberSections(TypeDocumentation $type, SymbolIndex $symbols, string $prefix): string
     {
         $html = '';
 
         if ($type->constants !== []) {
             $html .= '<section class="card"><h2>Constants</h2><div class="member-list">';
             foreach ($type->constants as $constant) {
-                $html .= sprintf('<article id="constant-%s"><h3><code>%s const %s</code></h3>%s</article>', $this->escape(strtolower($constant->name)), $this->escape($constant->visibility), $this->escape($constant->name), $this->renderPhpDoc($constant->phpDoc));
+                $html .= sprintf('<article id="constant-%s"><h3><code>%s const %s</code></h3>%s%s</article>', $this->escape(strtolower($constant->name)), $this->escape($constant->visibility), $this->escape($constant->name), $this->renderAttributes($constant->attributes), $this->renderPhpDoc($constant->phpDoc, $symbols, $type->namespace, $prefix));
             }
             $html .= '</div></section>';
         }
@@ -115,7 +147,7 @@ final class HtmlRenderer implements RendererInterface
             $html .= '<section class="card"><h2>Enum cases</h2><div class="member-list">';
             foreach ($type->enumCases as $case) {
                 $value = $case->value !== null ? ' = ' . $case->value : '';
-                $html .= sprintf('<article id="case-%s"><h3><code>case %s%s</code></h3>%s</article>', $this->escape(strtolower($case->name)), $this->escape($case->name), $this->escape($value), $this->renderPhpDoc($case->phpDoc));
+                $html .= sprintf('<article id="case-%s"><h3><code>case %s%s</code></h3>%s%s</article>', $this->escape(strtolower($case->name)), $this->escape($case->name), $this->escape($value), $this->renderAttributes($case->attributes), $this->renderPhpDoc($case->phpDoc, $symbols, $type->namespace, $prefix));
             }
             $html .= '</div></section>';
         }
@@ -124,7 +156,7 @@ final class HtmlRenderer implements RendererInterface
             $html .= '<section class="card"><h2>Properties</h2><div class="member-list">';
             foreach ($type->properties as $property) {
                 $signature = trim($property->visibility . ($property->static ? ' static' : '') . ($property->readonly ? ' readonly' : '') . ' ' . ($property->type !== null ? $property->type . ' ' : '') . '$' . $property->name);
-                $html .= sprintf('<article id="property-%s"><h3><code>%s</code></h3>%s</article>', $this->escape(strtolower($property->name)), $this->escape($signature), $this->renderPhpDoc($property->phpDoc));
+                $html .= sprintf('<article id="property-%s"><h3><code>%s</code></h3>%s%s</article>', $this->escape(strtolower($property->name)), $this->escape($signature), $this->renderAttributes($property->attributes), $this->renderPhpDoc($property->phpDoc, $symbols, $type->namespace, $prefix));
             }
             $html .= '</div></section>';
         }
@@ -134,7 +166,7 @@ final class HtmlRenderer implements RendererInterface
             $html .= '<p class="muted">No methods declared.</p>';
         } else {
             foreach ($type->methods as $method) {
-                $html .= $this->methodRow($method, $type);
+                $html .= $this->methodRow($method, $type, $symbols, $prefix);
             }
         }
         $html .= '</div></section>';
@@ -143,12 +175,12 @@ final class HtmlRenderer implements RendererInterface
     }
 
     /** @param list<FunctionDocumentation> $functions */
-    private function writeFunctionsPage(ProjectDocumentation $project, array $functions, string $outputDirectory): void
+    private function writeFunctionsPage(ProjectDocumentation $project, array $functions, SymbolIndex $symbols, string $outputDirectory): void
     {
         $items = '';
         foreach ($functions as $function) {
             $signature = sprintf('function %s(%s)%s', $function->fullyQualifiedName, implode(', ', $function->parameters), $function->returnType !== null ? ': ' . $function->returnType : '');
-            $items .= sprintf('<article class="method" id="function-%s"><h2><code>%s</code></h2>%s<p><a href="../%s#L%d">%s:%d</a></p></article>', $this->escape(rawurlencode(strtolower($function->fullyQualifiedName))), $this->escape($signature), $this->renderPhpDoc($function->phpDoc), $this->escape($this->sourcePath($function->sourcePath)), $function->line, $this->escape($function->sourcePath), $function->line);
+            $items .= sprintf('<article class="method" id="function-%s"><h2><code>%s</code></h2>%s%s<p><a href="../%s#L%d">%s:%d</a></p></article>', $this->escape(rawurlencode(strtolower($function->fullyQualifiedName))), $this->escape($signature), $this->renderAttributes($function->attributes), $this->renderPhpDoc($function->phpDoc, $symbols, $function->namespace, '../'), $this->escape($this->sourcePath($function->sourcePath)), $function->line, $this->escape($function->sourcePath), $function->line);
         }
         $body = '<p class="eyebrow">Functions</p><h1>Functions</h1><section class="card">' . ($items !== '' ? $items : '<p class="muted">No top-level functions found.</p>') . '</section>';
         $path = $outputDirectory . DIRECTORY_SEPARATOR . 'functions' . DIRECTORY_SEPARATOR . 'index.html';
@@ -290,13 +322,23 @@ JS;
         $this->write($assets . DIRECTORY_SEPARATOR . 'sourceslate.js', $script . PHP_EOL);
     }
 
-    private function methodRow(MethodDocumentation $method, TypeDocumentation $type): string
+    private function methodRow(MethodDocumentation $method, TypeDocumentation $type, SymbolIndex $symbols, string $prefix): string
     {
         $signature = sprintf('%s%s function %s(%s)%s', $method->visibility, $method->static ? ' static' : '', $method->name, implode(', ', $method->parameters), $method->returnType !== null ? ': ' . $method->returnType : '');
-        return sprintf('<article class="method" id="method-%s"><h3><code>%s</code></h3>%s<p class="source-ref"><a href="%s#L%d">%s:%d</a></p></article>', $this->escape(rawurlencode(strtolower($method->name))), $this->escape($signature), $this->renderPhpDoc($method->phpDoc), $this->escape($this->relativeSourceFromType($type)), $method->line, $this->escape($type->sourcePath), $method->line);
+        return sprintf('<article class="method" id="method-%s"><h3><code>%s</code></h3>%s%s<p class="source-ref"><a href="%s#L%d">%s:%d</a></p></article>', $this->escape(rawurlencode(strtolower($method->name))), $this->escape($signature), $this->renderAttributes($method->attributes), $this->renderPhpDoc($method->phpDoc, $symbols, $type->namespace, $prefix), $this->escape($this->relativeSourceFromType($type)), $method->line, $this->escape($type->sourcePath), $method->line);
     }
 
-    private function renderPhpDoc(?PhpDocBlock $doc): string
+    /** @param list<AttributeDocumentation> $attributes */
+    private function renderAttributes(array $attributes): string
+    {
+        if ($attributes === []) {
+            return '';
+        }
+        $items = array_map(fn (AttributeDocumentation $attribute): string => '<code>' . $this->escape($attribute->signature()) . '</code>', $attributes);
+        return '<div class="attributes">' . implode(' ', $items) . '</div>';
+    }
+
+    private function renderPhpDoc(?PhpDocBlock $doc, ?SymbolIndex $symbols = null, ?string $namespace = null, string $prefix = ''): string
     {
         if ($doc === null) {
             return '<p class="muted">No PHPDoc description.</p>';
@@ -312,11 +354,28 @@ JS;
             $html .= '<dl class="tags">';
             foreach ($doc->tags as $tag) {
                 $value = trim(implode(' ', array_filter([$tag->type, $tag->subject, $tag->description, !$tag->known ? $tag->rawValue : null])));
-                $html .= '<dt>@' . $this->escape($tag->name) . '</dt><dd><code>' . $this->escape($value) . '</code></dd>';
+                $rendered = '<code>' . $this->escape($value) . '</code>';
+                if ($symbols !== null && strtolower($tag->name) === 'see') {
+                    $candidate = preg_split('/\s+/', trim($tag->description ?? $tag->rawValue), 2)[0] ?? '';
+                    $target = $candidate !== '' ? $symbols->resolve($candidate, $namespace) : null;
+                    if ($target !== null) {
+                        $rendered = '<a href="' . $this->escape($prefix . $target->url) . '"><code>' . $this->escape($value) . '</code></a>';
+                    }
+                }
+                $html .= '<dt>@' . $this->escape($tag->name) . '</dt><dd>' . $rendered . '</dd>';
             }
             $html .= '</dl>';
         }
         return $html;
+    }
+
+    private function referenceHtml(string $reference, SymbolIndex $symbols, string $namespace, string $prefix): string
+    {
+        $target = $symbols->resolve($reference, $namespace);
+        if ($target === null) {
+            return '<code>' . $this->escape($reference) . '</code>';
+        }
+        return '<a href="' . $this->escape($prefix . $target->url) . '"><code>' . $this->escape($reference) . '</code></a>';
     }
 
     private function page(string $title, ProjectDocumentation $project, string $body, string $prefix): string
