@@ -15,6 +15,9 @@ SourceSlate diagnostics use stable identifiers so CI and automation do not need 
 | --- | --- |
 | `SS-SRC-0010` | Requested source mutation is not permitted for the resolved source type. |
 | `SS-SRC-0012` | Invalid source path or attempted escape from the repository worktree. |
+| `SS-SRC-0013` | A source file could not be read for source-header mutation. |
+| `SS-SRC-0014` | An atomic source-header update could not be written or published. |
+| `SS-SRC-0015` | Source-header updates would require a non-portable external documentation path. |
 | `SS-GIT-0020` | Git executable is unavailable. |
 | `SS-GIT-0021` | Repository is unavailable or an offline cache miss occurred. |
 | `SS-GIT-0022` | Git authentication failed. |
@@ -44,7 +47,9 @@ SourceSlate diagnostics use stable identifiers so CI and automation do not need 
 | `SS-CACHE-0025` | Cache entry is active and cannot be destructively modified. |
 | `SS-CACHE-0201` | Cached bare repository is missing. |
 | `SS-CACHE-0202` | Cache metadata is missing, malformed, incompatible, or inconsistent. |
-| `SS-CACHE-0203` | Cache verification failed. |
+| `SS-CACHE-0203` | Git object integrity verification failed. |
+| `SS-CACHE-0204` | Cached bare repository origin does not match the recorded repository identity. |
+| `SS-CACHE-0205` | A cached worktree is invalid, incomplete, or detached from its expected Git metadata. |
 | `SS-CACHE-0404` | Requested repository is not present in cache. |
 
 ## Doctor
@@ -55,9 +60,14 @@ SourceSlate diagnostics use stable identifiers so CI and automation do not need 
 | `SS-DOC-1002` | Required PHP extension is missing. |
 | `SS-DOC-1003` | `proc_open` is unavailable. |
 | `SS-DOC-1004` | Git is unavailable. |
-| `SS-DOC-1005` | Cache location is not writable. |
-| `SS-DOC-1006` | Lock location is not writable. |
+| `SS-DOC-1005` | Cache location is not writable or creatable. |
+| `SS-DOC-1006` | Lock location is not writable or creatable. |
 | `SS-DOC-1007` | Repair/cache debris requires cleanup or inspection. |
+| `SS-DOC-1010` | Local project root does not exist or is not readable. |
+| `SS-DOC-1011` | Project configuration could not be loaded or validated. |
+| `SS-DOC-1012` | A configured source root is missing or unreadable. |
+| `SS-DOC-1013` | Documentation output is not writable or cannot be created. |
+| `SS-DOC-1014` | Documentation output traverses a symbolic-link component. |
 
 ## Internal failures
 
