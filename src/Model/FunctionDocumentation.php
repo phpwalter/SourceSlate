@@ -8,7 +8,10 @@ use SourceSlate\PhpDoc\Model\PhpDocBlock;
 
 final readonly class FunctionDocumentation
 {
-    /** @param list<string> $parameters */
+    /**
+     * @param list<string> $parameters
+     * @param list<AttributeDocumentation> $attributes
+     */
     public function __construct(
         public string $name,
         public string $fullyQualifiedName,
@@ -18,6 +21,7 @@ final readonly class FunctionDocumentation
         public ?string $returnType,
         public int $line,
         public ?PhpDocBlock $phpDoc = null,
+        public array $attributes = [],
     ) {
     }
 }

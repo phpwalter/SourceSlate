@@ -16,6 +16,7 @@ final readonly class TypeDocumentation
      * @param list<PropertyDocumentation> $properties
      * @param list<ConstantDocumentation> $constants
      * @param list<EnumCaseDocumentation> $enumCases
+     * @param list<AttributeDocumentation> $attributes
      */
     public function __construct(
         public string $name,
@@ -32,6 +33,7 @@ final readonly class TypeDocumentation
         public array $properties = [],
         public array $constants = [],
         public array $enumCases = [],
+        public array $attributes = [],
     ) {
     }
 }
