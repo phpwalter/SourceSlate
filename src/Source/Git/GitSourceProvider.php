@@ -57,7 +57,14 @@ final readonly class GitSourceProvider
                     $cacheStatus = 'offline';
                 } else {
                     try {
-                        $this->git->run(['--git-dir=' . $bare, 'fetch', '--prune', '--tags', 'origin']);
+                        $this->git->run([
+                            '--git-dir=' . $bare,
+                            'fetch',
+                            '--prune',
+                            '--tags',
+                            'origin',
+                            '+refs/heads/*:refs/heads/*',
+                        ]);
                         $cacheStatus = $request->refresh ? 'refreshed' : 'hit';
                     } catch (GitException $exception) {
                         if ($exception->exitCode === 22) {
