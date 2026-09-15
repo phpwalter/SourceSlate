@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace SourceSlate\Parser;
 
 use PhpParser\Node;
-use PhpParser\NodeFinder;
 use PhpParser\ParserFactory;
+use PhpParser\PrettyPrinter\Standard as PrettyPrinter;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use SourceSlate\Configuration\Configuration;
@@ -37,7 +37,6 @@ final class PhpSourceParser implements SourceParserInterface
             }
 
             $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($absoluteSource, RecursiveDirectoryIterator::SKIP_DOTS));
-
             /** @var SplFileInfo $file */
             foreach ($iterator as $file) {
                 if (!$file->isFile() || strtolower($file->getExtension()) !== 'php') {
@@ -69,7 +68,6 @@ final class PhpSourceParser implements SourceParserInterface
         }
 
         usort($files, static fn (FileDocumentation $a, FileDocumentation $b): int => $a->path <=> $b->path);
-
         return new ProjectDocumentation($configuration->projectName, $files);
     }
 
@@ -136,6 +134,7 @@ final class PhpSourceParser implements SourceParserInterface
         $properties = [];
         $constants = [];
         $enumCases = [];
+        $propertyNames = [];
 
         foreach ($classLike->stmts as $statement) {
             if ($statement instanceof Node\Stmt\TraitUse) {
@@ -144,11 +143,32 @@ final class PhpSourceParser implements SourceParserInterface
                 }
             } elseif ($statement instanceof Node\Stmt\ClassMethod) {
                 $methods[] = $this->mapMethod($statement, $phpDocParser);
+                if (strtolower($statement->name->toString()) === '__construct') {
+                    foreach ($statement->params as $parameter) {
+                        if (!$parameter->isPromoted() || !is_string($parameter->var->name)) {
+                            continue;
+                        }
+                        $propertyName = $parameter->var->name;
+                        if (isset($propertyNames[$propertyName])) {
+                            continue;
+                        }
+                        $properties[] = new PropertyDocumentation(
+                            $propertyName,
+                            $parameter->isPrivate() ? 'private' : ($parameter->isProtected() ? 'protected' : 'public'),
+                            false,
+                            $parameter->isReadonly(),
+                            $parameter->type !== null ? $this->typeToString($parameter->type) : null,
+                            max(1, $parameter->getStartLine()),
+                        );
+                        $propertyNames[$propertyName] = true;
+                    }
+                }
             } elseif ($statement instanceof Node\Stmt\Property) {
                 $visibility = $statement->isPrivate() ? 'private' : ($statement->isProtected() ? 'protected' : 'public');
                 foreach ($statement->props as $property) {
+                    $propertyName = $property->name->toString();
                     $properties[] = new PropertyDocumentation(
-                        $property->name->toString(),
+                        $propertyName,
                         $visibility,
                         $statement->isStatic(),
                         $statement->isReadonly(),
@@ -156,6 +176,7 @@ final class PhpSourceParser implements SourceParserInterface
                         max(1, $statement->getStartLine()),
                         $this->parseDocComment($statement, $phpDocParser),
                     );
+                    $propertyNames[$propertyName] = true;
                 }
             } elseif ($statement instanceof Node\Stmt\ClassConst) {
                 $visibility = $statement->isPrivate() ? 'private' : ($statement->isProtected() ? 'protected' : 'public');
@@ -223,6 +244,12 @@ final class PhpSourceParser implements SourceParserInterface
         $parameters = [];
         foreach ($params as $parameter) {
             $text = '';
+            if ($parameter->isPromoted()) {
+                $text .= $parameter->isPrivate() ? 'private ' : ($parameter->isProtected() ? 'protected ' : 'public ');
+                if ($parameter->isReadonly()) {
+                    $text .= 'readonly ';
+                }
+            }
             if ($parameter->type !== null) {
                 $text .= $this->typeToString($parameter->type) . ' ';
             }
@@ -233,6 +260,9 @@ final class PhpSourceParser implements SourceParserInterface
                 $text .= '...';
             }
             $text .= '$' . (is_string($parameter->var->name) ? $parameter->var->name : 'parameter');
+            if ($parameter->default instanceof Node\Expr) {
+                $text .= ' = ' . (new PrettyPrinter())->prettyPrintExpr($parameter->default);
+            }
             $parameters[] = $text;
         }
         return $parameters;
