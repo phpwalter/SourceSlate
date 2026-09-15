@@ -75,6 +75,54 @@ final class SourceHeaderBuildIntegrationTest extends TestCase
         }
     }
 
+    public function testExternalOutputIsAllowedWithoutSourceMutation(): void
+    {
+        $root = $this->temporaryProject();
+        $external = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'sourceslate-external-docs-' . bin2hex(random_bytes(6));
+
+        try {
+            $tester = new CommandTester(new BuildCommand());
+            $status = $tester->execute([
+                'project' => $root,
+                '--output' => $external,
+                '--json' => true,
+            ]);
+
+            self::assertSame(0, $status);
+            self::assertFileExists($external . DIRECTORY_SEPARATOR . 'index.html');
+        } finally {
+            $this->removeDirectory($external);
+            $this->removeDirectory($root);
+        }
+    }
+
+    public function testUpdateSourceRejectsExternalOutputBeforeWritingHostPath(): void
+    {
+        $root = $this->temporaryProject();
+        $source = $root . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR . 'Example.php';
+        $before = (string) file_get_contents($source);
+        $external = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'sourceslate-private-output-' . bin2hex(random_bytes(6));
+
+        try {
+            $tester = new CommandTester(new BuildCommand());
+            $status = $tester->execute([
+                'project' => $root,
+                '--output' => $external,
+                '--update-source' => true,
+                '--json' => true,
+            ]);
+            $payload = json_decode($tester->getDisplay(), true, flags: JSON_THROW_ON_ERROR);
+
+            self::assertSame(15, $status);
+            self::assertSame('SS-SRC-0015', $payload['code']);
+            self::assertSame($before, file_get_contents($source));
+            self::assertStringNotContainsString(str_replace('\\', '/', $external), str_replace('\\', '/', (string) file_get_contents($source)));
+        } finally {
+            $this->removeDirectory($external);
+            $this->removeDirectory($root);
+        }
+    }
+
     private function temporaryProject(): string
     {
         $root = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'sourceslate-header-build-' . bin2hex(random_bytes(6));
