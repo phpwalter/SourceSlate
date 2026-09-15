@@ -15,7 +15,8 @@ final class GitClient
         }
     }
 
-    public function run(array $arguments, ?string $cwd = null): string
+    /** @param list<string> $arguments @param array<string,string> $environment */
+    public function run(array $arguments, ?string $cwd = null, array $environment = []): string
     {
         $command = array_merge(['git'], $arguments);
         $escaped = array_map('escapeshellarg', $command);
@@ -24,7 +25,13 @@ final class GitClient
             2 => ['pipe', 'w'],
         ];
 
-        $process = proc_open(implode(' ', $escaped), $descriptorSpec, $pipes, $cwd, ['GIT_LFS_SKIP_SMUDGE' => '1']);
+        $inherited = getenv();
+        if (!is_array($inherited)) {
+            $inherited = [];
+        }
+        $processEnvironment = array_merge($inherited, ['GIT_LFS_SKIP_SMUDGE' => '1'], $environment);
+
+        $process = proc_open(implode(' ', $escaped), $descriptorSpec, $pipes, $cwd, $processEnvironment);
         if (!is_resource($process)) {
             throw new GitException('SS-GIT-0020', 'Unable to start git process.', 20);
         }
