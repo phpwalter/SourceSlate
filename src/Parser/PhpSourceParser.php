@@ -10,6 +10,7 @@ use PhpParser\PrettyPrinter\Standard as PrettyPrinter;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use SourceSlate\Configuration\Configuration;
+use SourceSlate\Model\AttributeDocumentation;
 use SourceSlate\Model\ConstantDocumentation;
 use SourceSlate\Model\EnumCaseDocumentation;
 use SourceSlate\Model\FileDocumentation;
@@ -24,6 +25,13 @@ use SplFileInfo;
 
 final class PhpSourceParser implements SourceParserInterface
 {
+    private PrettyPrinter $printer;
+
+    public function __construct()
+    {
+        $this->printer = new PrettyPrinter();
+    }
+
     public function parse(string $projectRoot, Configuration $configuration): ProjectDocumentation
     {
         $parser = (new ParserFactory())->createForNewestSupportedVersion();
@@ -159,6 +167,8 @@ final class PhpSourceParser implements SourceParserInterface
                             $parameter->isReadonly(),
                             $parameter->type !== null ? $this->typeToString($parameter->type) : null,
                             max(1, $parameter->getStartLine()),
+                            null,
+                            $this->mapAttributes($parameter->attrGroups),
                         );
                         $propertyNames[$propertyName] = true;
                     }
@@ -175,20 +185,33 @@ final class PhpSourceParser implements SourceParserInterface
                         $statement->type !== null ? $this->typeToString($statement->type) : null,
                         max(1, $statement->getStartLine()),
                         $this->parseDocComment($statement, $phpDocParser),
+                        $this->mapAttributes($statement->attrGroups),
                     );
                     $propertyNames[$propertyName] = true;
                 }
             } elseif ($statement instanceof Node\Stmt\ClassConst) {
                 $visibility = $statement->isPrivate() ? 'private' : ($statement->isProtected() ? 'protected' : 'public');
                 foreach ($statement->consts as $constant) {
-                    $constants[] = new ConstantDocumentation($constant->name->toString(), $visibility, max(1, $statement->getStartLine()), $this->parseDocComment($statement, $phpDocParser));
+                    $constants[] = new ConstantDocumentation(
+                        $constant->name->toString(),
+                        $visibility,
+                        max(1, $statement->getStartLine()),
+                        $this->parseDocComment($statement, $phpDocParser),
+                        $this->mapAttributes($statement->attrGroups),
+                    );
                 }
             } elseif ($statement instanceof Node\Stmt\EnumCase) {
                 $value = null;
                 if ($statement->expr instanceof Node\Scalar\String_ || $statement->expr instanceof Node\Scalar\Int_) {
                     $value = (string) $statement->expr->value;
                 }
-                $enumCases[] = new EnumCaseDocumentation($statement->name->toString(), max(1, $statement->getStartLine()), $value, $this->parseDocComment($statement, $phpDocParser));
+                $enumCases[] = new EnumCaseDocumentation(
+                    $statement->name->toString(),
+                    max(1, $statement->getStartLine()),
+                    $value,
+                    $this->parseDocComment($statement, $phpDocParser),
+                    $this->mapAttributes($statement->attrGroups),
+                );
             }
         }
 
@@ -207,6 +230,7 @@ final class PhpSourceParser implements SourceParserInterface
             $properties,
             $constants,
             $enumCases,
+            $this->mapAttributes($classLike->attrGroups),
         );
     }
 
@@ -220,6 +244,7 @@ final class PhpSourceParser implements SourceParserInterface
             $method->returnType !== null ? $this->typeToString($method->returnType) : null,
             max(1, $method->getStartLine()),
             $this->parseDocComment($method, $phpDocParser),
+            $this->mapAttributes($method->attrGroups),
         );
     }
 
@@ -235,6 +260,7 @@ final class PhpSourceParser implements SourceParserInterface
             $function->returnType !== null ? $this->typeToString($function->returnType) : null,
             max(1, $function->getStartLine()),
             $this->parseDocComment($function, $phpDocParser),
+            $this->mapAttributes($function->attrGroups),
         );
     }
 
@@ -244,6 +270,9 @@ final class PhpSourceParser implements SourceParserInterface
         $parameters = [];
         foreach ($params as $parameter) {
             $text = '';
+            foreach ($this->mapAttributes($parameter->attrGroups) as $attribute) {
+                $text .= $attribute->signature() . ' ';
+            }
             if ($parameter->isPromoted()) {
                 $text .= $parameter->isPrivate() ? 'private ' : ($parameter->isProtected() ? 'protected ' : 'public ');
                 if ($parameter->isReadonly()) {
@@ -261,11 +290,30 @@ final class PhpSourceParser implements SourceParserInterface
             }
             $text .= '$' . (is_string($parameter->var->name) ? $parameter->var->name : 'parameter');
             if ($parameter->default instanceof Node\Expr) {
-                $text .= ' = ' . (new PrettyPrinter())->prettyPrintExpr($parameter->default);
+                $text .= ' = ' . $this->printer->prettyPrintExpr($parameter->default);
             }
             $parameters[] = $text;
         }
         return $parameters;
+    }
+
+    /** @param list<Node\AttributeGroup> $groups @return list<AttributeDocumentation> */
+    private function mapAttributes(array $groups): array
+    {
+        $attributes = [];
+        foreach ($groups as $group) {
+            foreach ($group->attrs as $attribute) {
+                $arguments = [];
+                foreach ($attribute->args as $argument) {
+                    $value = $this->printer->prettyPrintExpr($argument->value);
+                    $arguments[] = $argument->name !== null
+                        ? $argument->name->toString() . ': ' . $value
+                        : $value;
+                }
+                $attributes[] = new AttributeDocumentation($attribute->name->toString(), $arguments);
+            }
+        }
+        return $attributes;
     }
 
     private function typeToString(Node $type): string
