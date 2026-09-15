@@ -40,9 +40,11 @@
   ],
   "scripts": {
     "test": "phpunit",
+    "lint": "php tools/lint_php.php",
     "validate-project": "composer validate --strict",
     "check": [
       "@validate-project",
+      "@lint",
       "@test"
     ]
   },
