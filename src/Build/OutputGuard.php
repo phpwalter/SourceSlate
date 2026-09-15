@@ -10,7 +10,16 @@ final readonly class OutputGuard
 {
     public function assertWritable(string $outputDirectory, bool $force = false): void
     {
+        if (is_link($outputDirectory)) {
+            throw new OutputException(
+                'SS-OUT-0042',
+                sprintf('Output directory may not be a symbolic link: %s', $outputDirectory),
+                42,
+            );
+        }
+
         if (!file_exists($outputDirectory)) {
+            $this->assertNoSymlinkAncestor($outputDirectory);
             return;
         }
 
@@ -21,6 +30,8 @@ final readonly class OutputGuard
                 40,
             );
         }
+
+        $this->assertNoSymlinkAncestor($outputDirectory);
 
         $entries = scandir($outputDirectory);
         if ($entries === false) {
@@ -53,5 +64,22 @@ final readonly class OutputGuard
             ),
             41,
         );
+    }
+
+    private function assertNoSymlinkAncestor(string $path): void
+    {
+        $candidate = $path;
+        while ($candidate !== dirname($candidate)) {
+            if (file_exists($candidate) || is_link($candidate)) {
+                if (is_link($candidate)) {
+                    throw new OutputException(
+                        'SS-OUT-0042',
+                        sprintf('Output path traverses a symbolic link: %s', $candidate),
+                        42,
+                    );
+                }
+            }
+            $candidate = dirname($candidate);
+        }
     }
 }
