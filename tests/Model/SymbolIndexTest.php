@@ -28,7 +28,11 @@ final class SymbolIndexTest extends TestCase
             methods: [],
         );
         $index = SymbolIndex::fromProject(new ProjectDocumentation('Fixture', [
-            new FileDocumentation('src/Example.php', '', [$type], []),
+            new FileDocumentation(
+                path: 'src/Example.php',
+                declaredSymbols: ['Acme\\Domain\\Example'],
+                types: [$type],
+            ),
         ]));
 
         self::assertSame('Acme\\Domain\\Example', $index->resolve('Acme\\Domain\\Example')?->qualifiedName);
@@ -40,7 +44,11 @@ final class SymbolIndexTest extends TestCase
         $method = new MethodDocumentation('run', 'public', false, [], 'void', 20);
         $type = new TypeDocumentation('Example', 'Acme\\Example', 'Acme', 'class', 'src/Example.php', 10, [], [], [], [$method]);
         $index = SymbolIndex::fromProject(new ProjectDocumentation('Fixture', [
-            new FileDocumentation('src/Example.php', '', [$type], []),
+            new FileDocumentation(
+                path: 'src/Example.php',
+                declaredSymbols: ['Acme\\Example'],
+                types: [$type],
+            ),
         ]));
 
         self::assertSame('method', $index->resolve('Acme\\Example::run()')?->kind);
@@ -52,8 +60,8 @@ final class SymbolIndexTest extends TestCase
         $first = new TypeDocumentation('Example', 'One\\Example', 'One', 'class', 'one.php', 1, [], [], [], []);
         $second = new TypeDocumentation('Example', 'Two\\Example', 'Two', 'class', 'two.php', 1, [], [], [], []);
         $index = SymbolIndex::fromProject(new ProjectDocumentation('Fixture', [
-            new FileDocumentation('one.php', '', [$first], []),
-            new FileDocumentation('two.php', '', [$second], []),
+            new FileDocumentation(path: 'one.php', declaredSymbols: ['One\\Example'], types: [$first]),
+            new FileDocumentation(path: 'two.php', declaredSymbols: ['Two\\Example'], types: [$second]),
         ]));
 
         self::assertNull($index->resolve('Example'));
