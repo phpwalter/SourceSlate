@@ -8,6 +8,7 @@ use SourceSlate\Exception\CacheException;
 use SourceSlate\Exception\SourceSlateException;
 use SourceSlate\Source\Git\GitCache;
 use SourceSlate\Source\Git\GitCacheMetadata;
+use SourceSlate\Source\Git\GitCacheOperationLock;
 use SourceSlate\Source\Git\GitClient;
 use SourceSlate\Source\Git\GitRepositoryIdentity;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -30,6 +31,8 @@ final class CacheRepairCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $candidate = null;
+        $maintenanceLock = null;
+        $operationLock = null;
 
         try {
             if (!(bool) $input->getOption('yes')) {
@@ -39,6 +42,11 @@ final class CacheRepairCommand extends Command
             $identity = GitRepositoryIdentity::fromUrl((string) $input->getArgument('repository'));
             $cache = GitCache::default();
             $directory = $cache->repositoryDirectory($identity);
+
+            $maintenanceLock = $cache->maintenanceLock();
+            $operationLock = $cache->operationLock($identity);
+            $maintenanceLock->acquireShared();
+            $operationLock->acquireExclusive();
 
             if (is_dir($directory) && $cache->isActive($identity)) {
                 throw new CacheException(
@@ -94,6 +102,12 @@ final class CacheRepairCommand extends Command
         } finally {
             if ($candidate !== null && is_dir($candidate)) {
                 $this->removeTreeQuietly($candidate);
+            }
+            if ($operationLock instanceof GitCacheOperationLock) {
+                $operationLock->release();
+            }
+            if ($maintenanceLock instanceof GitCacheOperationLock) {
+                $maintenanceLock->release();
             }
         }
     }
