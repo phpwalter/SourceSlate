@@ -1,0 +1,14 @@
+project:
+  name: SourceSlate Basic Example
+
+source:
+  paths:
+    - src
+  exclude:
+    - vendor
+
+output:
+  path: docs
+
+source_headers:
+  update: false
