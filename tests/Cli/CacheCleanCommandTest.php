@@ -39,7 +39,7 @@ final class CacheCleanCommandTest extends TestCase
         mkdir($repair, 0777, true);
         touch($repair, time() - 172800);
 
-        [$status, $display] = $this->run(['command' => 'cache:clean', '--older-than' => '24h', '--dry-run' => true]);
+        [$status, $display] = $this->runCommand(['command' => 'cache:clean', '--older-than' => '24h', '--dry-run' => true]);
 
         self::assertSame(0, $status);
         self::assertStringContainsString('Would remove:', $display);
@@ -58,7 +58,7 @@ final class CacheCleanCommandTest extends TestCase
         file_put_contents($lock, '{}');
         touch($lock, time() - 172800);
 
-        [$status] = $this->run(['command' => 'cache:clean', '--older-than' => '24h']);
+        [$status] = $this->runCommand(['command' => 'cache:clean', '--older-than' => '24h']);
 
         self::assertSame(0, $status);
         self::assertDirectoryDoesNotExist($repair);
@@ -66,7 +66,7 @@ final class CacheCleanCommandTest extends TestCase
     }
 
     /** @return array{0:int,1:string} */
-    private function run(array $input): array
+    private function runCommand(array $input): array
     {
         $application = new Application();
         $application->setAutoExit(false);
