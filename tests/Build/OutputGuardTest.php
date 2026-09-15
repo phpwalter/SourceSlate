@@ -14,7 +14,6 @@ final class OutputGuardTest extends TestCase
     {
         $root = $this->temporaryDirectory();
         $output = $root . DIRECTORY_SEPARATOR . 'docs';
-
         try {
             (new OutputGuard())->assertWritable($output);
             self::assertDirectoryDoesNotExist($output);
@@ -28,7 +27,6 @@ final class OutputGuardTest extends TestCase
         $root = $this->temporaryDirectory();
         $output = $root . DIRECTORY_SEPARATOR . 'docs';
         mkdir($output);
-
         try {
             (new OutputGuard())->assertWritable($output);
             self::assertDirectoryExists($output);
@@ -44,7 +42,6 @@ final class OutputGuardTest extends TestCase
         mkdir($output);
         file_put_contents($output . DIRECTORY_SEPARATOR . 'index.html', 'old');
         file_put_contents($output . DIRECTORY_SEPARATOR . '.sourceslate-manifest.json', '{}');
-
         try {
             (new OutputGuard())->assertWritable($output);
             self::assertFileExists($output . DIRECTORY_SEPARATOR . 'index.html');
@@ -59,11 +56,9 @@ final class OutputGuardTest extends TestCase
         $output = $root . DIRECTORY_SEPARATOR . 'docs';
         mkdir($output);
         file_put_contents($output . DIRECTORY_SEPARATOR . 'keep.txt', 'important');
-
         try {
             $this->expectException(OutputException::class);
             $this->expectExceptionMessage('Output directory contains unmanaged files');
-
             (new OutputGuard())->assertWritable($output);
         } finally {
             $this->removeDirectory($root);
@@ -76,7 +71,6 @@ final class OutputGuardTest extends TestCase
         $output = $root . DIRECTORY_SEPARATOR . 'docs';
         mkdir($output);
         file_put_contents($output . DIRECTORY_SEPARATOR . 'keep.txt', 'important');
-
         try {
             (new OutputGuard())->assertWritable($output, true);
             self::assertFileExists($output . DIRECTORY_SEPARATOR . 'keep.txt');
@@ -90,13 +84,37 @@ final class OutputGuardTest extends TestCase
         $root = $this->temporaryDirectory();
         $output = $root . DIRECTORY_SEPARATOR . 'docs';
         file_put_contents($output, 'not a directory');
-
         try {
             $this->expectException(OutputException::class);
             $this->expectExceptionMessage('Output path is not a directory');
-
             (new OutputGuard())->assertWritable($output);
         } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
+    public function testSymlinkedOutputDirectoryIsRejectedWhenSymlinksAreSupported(): void
+    {
+        if (!function_exists('symlink')) {
+            self::markTestSkipped('symlink() is unavailable.');
+        }
+
+        $root = $this->temporaryDirectory();
+        $target = $root . DIRECTORY_SEPARATOR . 'target';
+        $output = $root . DIRECTORY_SEPARATOR . 'docs';
+        mkdir($target);
+
+        if (!@symlink($target, $output)) {
+            $this->removeDirectory($root);
+            self::markTestSkipped('Creating symlinks is not permitted in this environment.');
+        }
+
+        try {
+            $this->expectException(OutputException::class);
+            $this->expectExceptionMessage('symbolic link');
+            (new OutputGuard())->assertWritable($output, true);
+        } finally {
+            @unlink($output);
             $this->removeDirectory($root);
         }
     }
@@ -114,7 +132,6 @@ final class OutputGuardTest extends TestCase
             @unlink($path);
             return;
         }
-
         foreach (array_diff(scandir($path) ?: [], ['.', '..']) as $item) {
             $child = $path . DIRECTORY_SEPARATOR . $item;
             if (is_dir($child) && !is_link($child)) {
