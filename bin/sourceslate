@@ -14,6 +14,7 @@ $firstArgument = $arguments[1] ?? null;
 $commands = [
     'build',
     'doctor',
+    'config:show',
     'list',
     'help',
     'completion',
