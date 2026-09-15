@@ -51,12 +51,6 @@ final class PhpDocParser
         $this->parser = new VendorPhpDocParser($config, $typeParser, $constExprParser);
     }
 
-    /**
-     * Parses one complete PHPDoc comment.
-     *
-     * Unknown tags are preserved rather than rejected. Invalid PHPDoc grammar
-     * remains a parser error and is intentionally not converted into guessed data.
-     */
     public function parse(string $rawPhpDoc): PhpDocBlock
     {
         $tokens = new TokenIterator($this->lexer->tokenize($rawPhpDoc));
@@ -69,7 +63,13 @@ final class PhpDocParser
             if ($child instanceof PhpDocTextNode) {
                 $text = trim($child->text);
                 if ($text !== '') {
-                    $narrative[] = $text;
+                    $paragraphs = preg_split('/\R\s*\R/u', $text) ?: [];
+                    foreach ($paragraphs as $paragraph) {
+                        $paragraph = trim($paragraph);
+                        if ($paragraph !== '') {
+                            $narrative[] = $paragraph;
+                        }
+                    }
                 }
                 continue;
             }
