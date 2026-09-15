@@ -6,6 +6,8 @@ namespace SourceSlate\Command\Cache;
 
 use SourceSlate\Exception\CacheException;
 use SourceSlate\Source\Git\GitCache;
+use SourceSlate\Source\Git\GitCacheOperationLock;
+use SourceSlate\Source\Git\GitRepositoryIdentity;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -25,6 +27,8 @@ final class CachePruneCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $maintenanceLock = null;
+
         try {
             $seconds = $this->parseAge((string) $input->getOption('older-than'));
             $threshold = time() - $seconds;
@@ -32,6 +36,9 @@ final class CachePruneCommand extends Command
             $cache = GitCache::default();
             $root = $cache->root();
             $dryRun = (bool) $input->getOption('dry-run');
+
+            $maintenanceLock = $cache->maintenanceLock();
+            $maintenanceLock->acquireShared();
 
             if (!is_dir($root)) {
                 $output->writeln('<info>No cached repositories.</info>');
@@ -77,7 +84,18 @@ final class CachePruneCommand extends Command
                 ));
 
                 if (!$dryRun) {
-                    $this->removeTree($entry['directory']);
+                    $identity = GitRepositoryIdentity::fromUrl($entry['repository_url']);
+                    $operationLock = $cache->operationLock($identity);
+                    $operationLock->acquireExclusive();
+                    try {
+                        if ($cache->isRepositoryDirectoryActive($entry['directory'])) {
+                            $output->writeln(sprintf('<comment>Skipping active cache entry: %s</comment>', $entry['repository']));
+                            continue;
+                        }
+                        $this->removeTree($entry['directory']);
+                    } finally {
+                        $operationLock->release();
+                    }
                 }
             }
 
@@ -88,15 +106,19 @@ final class CachePruneCommand extends Command
             }
 
             $count = count($selected);
-            $output->writeln(sprintf('<info>%d cache entr%s %s.</info>', $count, $count === 1 ? 'y' : 'ies', $dryRun ? 'would be pruned' : 'pruned'));
+            $output->writeln(sprintf('<info>%d cache entr%s %s.</info>', $count, $count === 1 ? 'y' : 'ies', $dryRun ? 'would be pruned' : 'selected for pruning'));
             return Command::SUCCESS;
         } catch (CacheException $exception) {
             $output->writeln(sprintf('<error>%s</error>', $exception->formattedMessage()));
             return $exception->exitCode;
+        } finally {
+            if ($maintenanceLock instanceof GitCacheOperationLock) {
+                $maintenanceLock->release();
+            }
         }
     }
 
-    /** @return list<array{directory:string,repository:string,last_used:int,size:int,active:bool}> */
+    /** @return list<array{directory:string,repository:string,repository_url:string,last_used:int,size:int,active:bool}> */
     private function entries(string $root, GitCache $cache): array
     {
         $entries = [];
@@ -114,13 +136,15 @@ final class CachePruneCommand extends Command
 
             $lastUsedValue = (string) ($data['state']['last_used_at'] ?? '');
             $lastUsed = $lastUsedValue !== '' ? strtotime($lastUsedValue) : false;
-            if ($lastUsed === false) {
+            $repositoryUrl = (string) ($data['repository']['transport_url'] ?? $data['repository']['canonical_url'] ?? '');
+            if ($lastUsed === false || $repositoryUrl === '') {
                 continue;
             }
 
             $entries[] = [
                 'directory' => $directory,
                 'repository' => (string) ($data['repository']['canonical_url'] ?? $name),
+                'repository_url' => $repositoryUrl,
                 'last_used' => $lastUsed,
                 'size' => $this->directorySize($directory),
                 'active' => $cache->isRepositoryDirectoryActive($directory),
