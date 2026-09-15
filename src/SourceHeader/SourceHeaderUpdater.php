@@ -9,9 +9,7 @@ final class SourceHeaderUpdater
     public function update(string $source, string $documentationPath): string
     {
         $documentationPath = trim(str_replace('\\', '/', $documentationPath));
-        if ($documentationPath === '') {
-            throw new \InvalidArgumentException('Documentation path must not be blank.');
-        }
+        $this->assertPortableDocumentationPath($documentationPath);
 
         $tagLine = '@sourceslate ' . $documentationPath;
 
@@ -44,5 +42,23 @@ final class SourceHeaderUpdater
         }
 
         throw new \InvalidArgumentException('Source does not contain a PHP opening tag.');
+    }
+
+    private function assertPortableDocumentationPath(string $path): void
+    {
+        if ($path === '') {
+            throw new \InvalidArgumentException('Documentation path must not be blank.');
+        }
+        if (str_starts_with($path, '/') || preg_match('/^[A-Za-z]:\//', $path) === 1) {
+            throw new \InvalidArgumentException('Documentation path must be relative, not absolute.');
+        }
+        if (preg_match('#^[A-Za-z][A-Za-z0-9+.-]*://#', $path) === 1) {
+            throw new \InvalidArgumentException('Documentation path must be a local relative path, not a URI.');
+        }
+        foreach (explode('/', $path) as $segment) {
+            if ($segment === '..') {
+                throw new \InvalidArgumentException('Documentation path must not traverse outside the project.');
+            }
+        }
     }
 }
