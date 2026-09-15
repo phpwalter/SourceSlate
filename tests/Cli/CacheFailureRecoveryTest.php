@@ -42,7 +42,7 @@ final class CacheFailureRecoveryTest extends TestCase
         $cache->ensureRepositoryDirectory($identity);
         file_put_contents($cache->metadataPath($identity), '{not-json');
 
-        [$status, $display] = $this->run(['command' => 'cache:verify']);
+        [$status, $display] = $this->runCommand(['command' => 'cache:verify']);
 
         self::assertSame(24, $status);
         self::assertStringContainsString('SS-CACHE-0202', $display);
@@ -61,7 +61,7 @@ final class CacheFailureRecoveryTest extends TestCase
             json_encode(GitCacheMetadata::create($identity)->toArray(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
         );
 
-        [$status, $display] = $this->run(['command' => 'cache:verify']);
+        [$status, $display] = $this->runCommand(['command' => 'cache:verify']);
 
         self::assertSame(24, $status);
         self::assertStringContainsString('SS-CACHE-0202', $display);
@@ -83,7 +83,7 @@ final class CacheFailureRecoveryTest extends TestCase
         file_put_contents($directory . DIRECTORY_SEPARATOR . 'sentinel.txt', 'last-known-good');
         $metadataBefore = file_get_contents($cache->metadataPath($identity));
 
-        [$status, $display] = $this->run([
+        [$status, $display] = $this->runCommand([
             'command' => 'cache:repair',
             'repository' => $repository,
             '--yes' => true,
@@ -98,7 +98,7 @@ final class CacheFailureRecoveryTest extends TestCase
     }
 
     /** @return array{0:int,1:string} */
-    private function run(array $input): array
+    private function runCommand(array $input): array
     {
         $application = new Application();
         $application->setAutoExit(false);
