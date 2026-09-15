@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+
+      - name: Validate package metadata
+        run: composer validate --strict
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Run tests
+        run: composer test
+
+      - name: Verify SourceSlate environment
+        run: php bin/sourceslate doctor --json
+
+      - name: Build documentation
+        run: php bin/sourceslate build . --config=sourceslate.example.yaml
+
+      - name: Verify deterministic output
+        run: php bin/sourceslate build . --config=sourceslate.example.yaml --check
+
+      - name: Build Composer distribution archive
+        run: composer archive --format=zip --dir=dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sourceslate-distribution
+          path: dist/*.zip
+          if-no-files-found: error
