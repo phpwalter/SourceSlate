@@ -27,8 +27,11 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
 
-      - name: Run tests
-        run: composer test
+      - name: Validate release tag
+        run: php tools/check_release_version.php
+
+      - name: Run full quality gate
+        run: composer check
 
       - name: Verify SourceSlate environment
         run: php bin/sourceslate doctor --json

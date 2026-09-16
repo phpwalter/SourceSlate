@@ -3,7 +3,7 @@
 /**
  * @file Application.php
  * @path src/Application.php
- * @version 1.6.0
+ * @version 1.7.0
  * @date 2026-09-15
  * @author Walter Torres
  * @copyright Copyright 2026, Walter Torres.
@@ -34,7 +34,7 @@ final class Application extends SymfonyApplication
 {
     public function __construct()
     {
-        parent::__construct('SourceSlate', '0.1.0-dev');
+        parent::__construct('SourceSlate', Version::VERSION);
 
         $this->add(new BuildCommand());
         $this->add(new DoctorCommand());
