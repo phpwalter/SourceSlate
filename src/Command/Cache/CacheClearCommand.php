@@ -18,12 +18,15 @@ final class CacheClearCommand extends Command
 {
     protected function configure(): void
     {
-        $this->addOption('yes', 'y', InputOption::VALUE_NONE, 'Confirm deletion without prompting.');
+        $this
+            ->addOption('yes', 'y', InputOption::VALUE_NONE, 'Confirm deletion without prompting.')
+            ->addOption('json', null, InputOption::VALUE_NONE, 'Emit machine-readable clear results.');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $maintenanceLock = null;
+        $json = (bool) $input->getOption('json');
 
         try {
             if (!(bool) $input->getOption('yes')) {
@@ -36,7 +39,16 @@ final class CacheClearCommand extends Command
 
             $root = $cache->root();
             if (!is_dir($root)) {
-                $output->writeln('<info>Cache is already empty.</info>');
+                if ($json) {
+                    $output->writeln(json_encode([
+                        'status' => 'success',
+                        'cleared' => false,
+                        'reason' => 'already-empty',
+                        'exit_code' => 0,
+                    ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
+                } else {
+                    $output->writeln('<info>Cache is already empty.</info>');
+                }
                 return Command::SUCCESS;
             }
 
@@ -52,10 +64,27 @@ final class CacheClearCommand extends Command
             }
 
             $this->removeTree($root);
-            $output->writeln('<info>SourceSlate Git cache cleared.</info>');
+            if ($json) {
+                $output->writeln(json_encode([
+                    'status' => 'success',
+                    'cleared' => true,
+                    'exit_code' => 0,
+                ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
+            } else {
+                $output->writeln('<info>SourceSlate Git cache cleared.</info>');
+            }
             return Command::SUCCESS;
         } catch (CacheException $exception) {
-            $output->writeln(sprintf('<error>%s</error>', $exception->formattedMessage()));
+            if ($json) {
+                $output->writeln(json_encode([
+                    'status' => 'error',
+                    'code' => $exception->diagnosticCode,
+                    'message' => $exception->getMessage(),
+                    'exit_code' => $exception->exitCode,
+                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+            } else {
+                $output->writeln(sprintf('<error>%s</error>', $exception->formattedMessage()));
+            }
             return $exception->exitCode;
         } finally {
             if ($maintenanceLock instanceof GitCacheOperationLock) {
