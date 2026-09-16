@@ -63,6 +63,7 @@ SourceSlate diagnostics use stable identifiers so CI and automation do not need 
 | `SS-DOC-1005` | Cache location is not writable or creatable. |
 | `SS-DOC-1006` | Lock location is not writable or creatable. |
 | `SS-DOC-1007` | Repair/cache debris requires cleanup or inspection. |
+| `SS-DOC-1008` | One or more cache entries fail shallow metadata/identity/bare-repository validation. |
 | `SS-DOC-1010` | Local project root does not exist or is not readable. |
 | `SS-DOC-1011` | Project configuration could not be loaded or validated. |
 | `SS-DOC-1012` | A configured source root is missing or unreadable. |
