@@ -35,6 +35,9 @@ jobs:
       - name: Run test suite
         run: composer test
 
+      - name: Audit release-critical repository invariants
+        run: php tools/release_audit.php --json
+
       - name: Check runtime environment
         run: php bin/sourceslate doctor --json
 
