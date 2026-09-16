@@ -19,11 +19,14 @@ final class CacheCleanCommand extends Command
     {
         $this
             ->addOption('older-than', null, InputOption::VALUE_REQUIRED, 'Remove debris older than this age, such as 24h or 7d.', '24h')
-            ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Report cleanup candidates without deleting them.');
+            ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Report cleanup candidates without deleting them.')
+            ->addOption('json', null, InputOption::VALUE_NONE, 'Emit machine-readable cleanup results.');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $json = (bool) $input->getOption('json');
+
         try {
             $age = $this->parseAge((string) $input->getOption('older-than'));
             $threshold = time() - $age;
@@ -39,19 +42,42 @@ final class CacheCleanCommand extends Command
                 );
                 sort($candidates, SORT_STRING);
                 foreach ($candidates as $candidate) {
-                    $output->writeln(sprintf('%s %s', $dryRun ? 'Would remove:' : 'Removing:', $candidate));
+                    if (!$json) {
+                        $output->writeln(sprintf('%s %s', $dryRun ? 'Would remove:' : 'Removing:', $candidate));
+                    }
                     if (!$dryRun) {
                         $this->removePath($candidate);
                     }
                 }
-                $count = count($candidates);
-                $output->writeln(sprintf('<info>%d stale cache artifact%s %s.</info>', $count, $count === 1 ? '' : 's', $dryRun ? 'would be removed' : 'removed'));
+
+                if ($json) {
+                    $output->writeln(json_encode([
+                        'status' => 'success',
+                        'mode' => $dryRun ? 'dry-run' : 'clean',
+                        'older_than' => (string) $input->getOption('older-than'),
+                        'candidates' => $candidates,
+                        'count' => count($candidates),
+                        'exit_code' => 0,
+                    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+                } else {
+                    $count = count($candidates);
+                    $output->writeln(sprintf('<info>%d stale cache artifact%s %s.</info>', $count, $count === 1 ? '' : 's', $dryRun ? 'would be removed' : 'removed'));
+                }
                 return Command::SUCCESS;
             } finally {
                 $maintenance->release();
             }
         } catch (CacheException $exception) {
-            $output->writeln('<error>' . $exception->formattedMessage() . '</error>');
+            if ($json) {
+                $output->writeln(json_encode([
+                    'status' => 'error',
+                    'code' => $exception->diagnosticCode,
+                    'message' => $exception->getMessage(),
+                    'exit_code' => $exception->exitCode,
+                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+            } else {
+                $output->writeln('<error>' . $exception->formattedMessage() . '</error>');
+            }
             return $exception->exitCode;
         }
     }
