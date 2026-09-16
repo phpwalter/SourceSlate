@@ -41,11 +41,13 @@
   "scripts": {
     "test": "phpunit",
     "lint": "php tools/lint_php.php",
+    "release-audit": "php tools/release_audit.php",
     "validate-project": "composer validate --strict",
     "check": [
       "@validate-project",
       "@lint",
-      "@test"
+      "@test",
+      "@release-audit"
     ]
   },
   "archive": {
