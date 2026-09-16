@@ -6,7 +6,11 @@ declare(strict_types=1);
 use SourceSlate\Application;
 use Symfony\Component\Console\Input\ArgvInput;
 
-require dirname(__DIR__) . '/vendor/autoload.php';
+$autoload = isset($_composer_autoload_path) && is_string($_composer_autoload_path)
+    ? $_composer_autoload_path
+    : dirname(__DIR__) . '/vendor/autoload.php';
+
+require $autoload;
 
 /** @var list<string> $arguments */
 $arguments = $_SERVER['argv'] ?? [];
