@@ -7,6 +7,7 @@ namespace SourceSlate\Command;
 use SourceSlate\Configuration\ConfigurationLoader;
 use SourceSlate\Source\Git\GitCache;
 use SourceSlate\Source\Git\GitClient;
+use SourceSlate\Source\Git\GitRepositoryIdentity;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -55,6 +56,14 @@ final class DoctorCommand extends Command
             $debris === [],
             $debris === [] ? 'none' : implode(', ', $debris),
             'SS-DOC-1007',
+        );
+
+        $cacheHealth = $this->cacheEntryHealth($cache);
+        $checks[] = $this->check(
+            'cache-entries',
+            $cacheHealth['invalid'] === 0,
+            sprintf('%d healthy, %d invalid', $cacheHealth['healthy'], $cacheHealth['invalid']),
+            'SS-DOC-1008',
         );
 
         $projectInput = (string) $input->getArgument('project');
@@ -112,6 +121,50 @@ final class DoctorCommand extends Command
     private function check(string $name, bool $passed, string $detail, string $code): array
     {
         return compact('name', 'passed', 'detail', 'code');
+    }
+
+    /** @return array{healthy:int,invalid:int} */
+    private function cacheEntryHealth(GitCache $cache): array
+    {
+        $root = $cache->root();
+        if (!is_dir($root)) {
+            return ['healthy' => 0, 'invalid' => 0];
+        }
+
+        $healthy = 0;
+        $invalid = 0;
+        foreach (array_diff(scandir($root) ?: [], ['.', '..']) as $entry) {
+            $directory = $root . DIRECTORY_SEPARATOR . $entry;
+            if (!is_dir($directory) || str_contains($entry, '.repair-')) {
+                continue;
+            }
+
+            $metadataPath = $directory . DIRECTORY_SEPARATOR . 'metadata.json';
+            $bare = $directory . DIRECTORY_SEPARATOR . 'repo.git';
+            if (!is_file($metadataPath) || !is_dir($bare)) {
+                ++$invalid;
+                continue;
+            }
+
+            try {
+                $raw = file_get_contents($metadataPath);
+                $data = is_string($raw) ? json_decode($raw, true, flags: JSON_THROW_ON_ERROR) : null;
+                $canonical = is_array($data) ? ($data['repository']['canonical_url'] ?? null) : null;
+                if (!is_string($canonical) || trim($canonical) === '') {
+                    throw new \RuntimeException('Missing repository identity.');
+                }
+                $identity = GitRepositoryIdentity::fromUrl($canonical);
+                if ($identity->cacheKey !== $entry) {
+                    throw new \RuntimeException('Cache directory does not match repository identity.');
+                }
+                $cache->loadMetadata($identity);
+                ++$healthy;
+            } catch (\Throwable) {
+                ++$invalid;
+            }
+        }
+
+        return ['healthy' => $healthy, 'invalid' => $invalid];
     }
 
     /** @return list<string> */

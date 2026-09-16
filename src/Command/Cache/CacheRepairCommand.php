@@ -25,7 +25,8 @@ final class CacheRepairCommand extends Command
     {
         $this
             ->addArgument('repository', InputArgument::REQUIRED, 'Git repository URL to repair.')
-            ->addOption('yes', 'y', InputOption::VALUE_NONE, 'Confirm replacement of the cached repository.');
+            ->addOption('yes', 'y', InputOption::VALUE_NONE, 'Confirm replacement of the cached repository.')
+            ->addOption('json', null, InputOption::VALUE_NONE, 'Emit machine-readable repair results.');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -33,6 +34,7 @@ final class CacheRepairCommand extends Command
         $candidate = null;
         $maintenanceLock = null;
         $operationLock = null;
+        $json = (bool) $input->getOption('json');
 
         try {
             if (!(bool) $input->getOption('yes')) {
@@ -69,8 +71,8 @@ final class CacheRepairCommand extends Command
             $git->run(['--git-dir=' . $candidateBare, 'fsck', '--no-dangling']);
 
             $metadata = GitCacheMetadata::create($identity);
-            $json = json_encode($metadata->toArray(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . PHP_EOL;
-            if (file_put_contents($candidateMetadata, $json, LOCK_EX) === false) {
+            $encoded = json_encode($metadata->toArray(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . PHP_EOL;
+            if (file_put_contents($candidateMetadata, $encoded, LOCK_EX) === false) {
                 throw new CacheException('SS-CACHE-0024', sprintf('Unable to write repair metadata: %s', $candidateMetadata), 24);
             }
 
@@ -94,10 +96,28 @@ final class CacheRepairCommand extends Command
                 $this->removeTree($backup);
             }
 
-            $output->writeln(sprintf('<info>Rebuilt cache for %s.</info>', $identity->canonicalUrl));
+            if ($json) {
+                $output->writeln(json_encode([
+                    'status' => 'success',
+                    'repository' => $identity->canonicalUrl,
+                    'cache_directory' => $directory,
+                    'exit_code' => 0,
+                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+            } else {
+                $output->writeln(sprintf('<info>Rebuilt cache for %s.</info>', $identity->canonicalUrl));
+            }
             return Command::SUCCESS;
         } catch (SourceSlateException $exception) {
-            $output->writeln(sprintf('<error>%s</error>', $exception->formattedMessage()));
+            if ($json) {
+                $output->writeln(json_encode([
+                    'status' => 'error',
+                    'code' => $exception->diagnosticCode,
+                    'message' => $exception->getMessage(),
+                    'exit_code' => $exception->exitCode,
+                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+            } else {
+                $output->writeln(sprintf('<error>%s</error>', $exception->formattedMessage()));
+            }
             return $exception->exitCode;
         } finally {
             if ($candidate !== null && is_dir($candidate)) {
