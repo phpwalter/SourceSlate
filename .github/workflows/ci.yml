@@ -43,3 +43,24 @@ jobs:
 
       - name: Verify deterministic documentation
         run: php bin/sourceslate build . --config=sourceslate.example.yaml --output=.sourceslate-ci-docs --check
+
+  global-install-smoke:
+    name: Composer global install smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+
+      - name: Register checked-out package as a Composer path repository
+        run: composer global config repositories.sourceslate path "$GITHUB_WORKSPACE"
+
+      - name: Install SourceSlate globally from the clean Composer home
+        run: composer global require "phpwalter/sourceslate:@dev" --no-interaction --prefer-source
+
+      - name: Verify global binary and version
+        run: composer global exec sourceslate -- --version
