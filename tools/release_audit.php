@@ -53,6 +53,7 @@ $add('ci-macos', str_contains($ci, 'macos-latest'), 'macos-latest');
 $add('ci-php83', str_contains($ci, "'8.3'"), 'PHP 8.3');
 $add('ci-php84', str_contains($ci, "'8.4'"), 'PHP 8.4');
 $add('ci-global-install', str_contains($ci, 'global-install-smoke'), 'global-install-smoke');
+$add('ci-public-https', str_contains($ci, 'public-https-smoke') && str_contains($ci, 'https://github.com/phpwalter/SourceSlate.git'), 'public HTTPS remote build');
 $add('ci-determinism', str_contains($ci, '--check'), 'documentation --check');
 
 $releasePath = $root . DIRECTORY_SEPARATOR . '.github' . DIRECTORY_SEPARATOR . 'workflows' . DIRECTORY_SEPARATOR . 'release.yml';
