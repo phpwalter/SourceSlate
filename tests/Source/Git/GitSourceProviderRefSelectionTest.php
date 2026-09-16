@@ -80,7 +80,7 @@ final class GitSourceProviderRefSelectionTest extends TestCase
         $git = new GitClient(30);
         $git->run(['branch', 'release'], $work);
         $git->run(['tag', 'release'], $work);
-        $git->run(['push', 'origin', 'release:refs/heads/release'], $work);
+        $git->run(['push', 'origin', 'refs/heads/release:refs/heads/release'], $work);
         $git->run(['push', 'origin', 'refs/tags/release'], $work);
 
         try {
@@ -108,7 +108,7 @@ final class GitSourceProviderRefSelectionTest extends TestCase
         $git->run(['-c', 'user.name=SourceSlate Tests', '-c', 'user.email=sourceslate@example.test', 'commit', '-m', 'release branch'], $work);
         $branchCommit = $git->run(['rev-parse', 'HEAD'], $work);
         $git->run(['branch', 'release'], $work);
-        $git->run(['push', 'origin', 'release:refs/heads/release'], $work);
+        $git->run(['push', 'origin', 'refs/heads/release:refs/heads/release'], $work);
         $git->run(['push', 'origin', 'refs/tags/release'], $work);
 
         try {
