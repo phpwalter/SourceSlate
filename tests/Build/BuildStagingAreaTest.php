@@ -6,6 +6,7 @@ namespace SourceSlate\Tests\Build;
 
 use PHPUnit\Framework\TestCase;
 use SourceSlate\Build\BuildStagingArea;
+use SourceSlate\Build\PublicationFilesystem;
 
 final class BuildStagingAreaTest extends TestCase
 {
@@ -45,6 +46,68 @@ final class BuildStagingAreaTest extends TestCase
             self::assertSame('new', file_get_contents($destination . DIRECTORY_SEPARATOR . 'index.html'));
             self::assertSame([], glob($destination . '.sourceslate-previous-*') ?: []);
         } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
+    public function testFailedPublishRestoresLastKnownGoodDestination(): void
+    {
+        $root = $this->temporaryDirectory();
+        $destination = $root . DIRECTORY_SEPARATOR . 'docs';
+        mkdir($destination);
+        file_put_contents($destination . DIRECTORY_SEPARATOR . 'index.html', 'old');
+
+        $filesystem = new FailingPublicationFilesystem(failPublishRename: true);
+        $staging = new BuildStagingArea($destination, $filesystem);
+        $stagingPath = $staging->path();
+        file_put_contents($stagingPath . DIRECTORY_SEPARATOR . 'index.html', 'new');
+
+        try {
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessage('Unable to publish SourceSlate output');
+            try {
+                $staging->publish();
+            } finally {
+                self::assertDirectoryExists($destination);
+                self::assertSame('old', file_get_contents($destination . DIRECTORY_SEPARATOR . 'index.html'));
+                self::assertDirectoryExists($stagingPath);
+                self::assertSame([], glob($destination . '.sourceslate-previous-*') ?: []);
+            }
+        } finally {
+            $staging->discard();
+            $this->removeDirectory($root);
+        }
+    }
+
+    public function testFailedPublishAndFailedRestorePreservesBackupForManualRecovery(): void
+    {
+        $root = $this->temporaryDirectory();
+        $destination = $root . DIRECTORY_SEPARATOR . 'docs';
+        mkdir($destination);
+        file_put_contents($destination . DIRECTORY_SEPARATOR . 'index.html', 'old');
+
+        $filesystem = new FailingPublicationFilesystem(failPublishRename: true, failRestoreRename: true);
+        $staging = new BuildStagingArea($destination, $filesystem);
+        $stagingPath = $staging->path();
+        file_put_contents($stagingPath . DIRECTORY_SEPARATOR . 'index.html', 'new');
+
+        try {
+            try {
+                $staging->publish();
+                self::fail('Expected publication failure.');
+            } catch (\RuntimeException $exception) {
+                self::assertStringContainsString('unable to restore previous output', strtolower($exception->getMessage()));
+                $backups = glob($destination . '.sourceslate-previous-*') ?: [];
+                self::assertCount(1, $backups);
+                self::assertSame('old', file_get_contents($backups[0] . DIRECTORY_SEPARATOR . 'index.html'));
+                self::assertDirectoryDoesNotExist($destination);
+                self::assertDirectoryExists($stagingPath);
+            }
+        } finally {
+            $staging->discard();
+            foreach (glob($destination . '.sourceslate-previous-*') ?: [] as $backup) {
+                $this->removeDirectory($backup);
+            }
             $this->removeDirectory($root);
         }
     }
@@ -230,5 +293,42 @@ final class BuildStagingAreaTest extends TestCase
             }
         }
         @rmdir($path);
+    }
+}
+
+final class FailingPublicationFilesystem implements PublicationFilesystem
+{
+    private bool $publishedRenameFailed = false;
+
+    public function __construct(
+        private readonly bool $failPublishRename,
+        private readonly bool $failRestoreRename = false,
+    ) {
+    }
+
+    public function exists(string $path): bool
+    {
+        return file_exists($path);
+    }
+
+    public function rename(string $from, string $to): bool
+    {
+        $isStagingPublish = str_contains(basename($from), '.sourceslate-build-') && basename($to) === 'docs';
+        if ($isStagingPublish && $this->failPublishRename && !$this->publishedRenameFailed) {
+            $this->publishedRenameFailed = true;
+            return false;
+        }
+
+        $isRestore = str_contains(basename($from), '.sourceslate-previous-') && basename($to) === 'docs';
+        if ($isRestore && $this->failRestoreRename) {
+            return false;
+        }
+
+        return @rename($from, $to);
+    }
+
+    public function unlink(string $path): bool
+    {
+        return !file_exists($path) || @unlink($path);
     }
 }
