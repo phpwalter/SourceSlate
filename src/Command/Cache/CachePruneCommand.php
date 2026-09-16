@@ -22,12 +22,14 @@ final class CachePruneCommand extends Command
         $this
             ->addOption('older-than', null, InputOption::VALUE_REQUIRED, 'Remove repositories not used within this age, such as 90d.', '90d')
             ->addOption('max-size', null, InputOption::VALUE_REQUIRED, 'Reduce cache to at most this size, such as 10GB.')
-            ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Report what would be removed without deleting anything.');
+            ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Report what would be removed without deleting anything.')
+            ->addOption('json', null, InputOption::VALUE_NONE, 'Emit machine-readable prune results.');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $maintenanceLock = null;
+        $json = (bool) $input->getOption('json');
 
         try {
             $seconds = $this->parseAge((string) $input->getOption('older-than'));
@@ -41,7 +43,18 @@ final class CachePruneCommand extends Command
             $maintenanceLock->acquireShared();
 
             if (!is_dir($root)) {
-                $output->writeln('<info>No cached repositories.</info>');
+                if ($json) {
+                    $output->writeln(json_encode([
+                        'status' => 'success',
+                        'mode' => $dryRun ? 'dry-run' : 'prune',
+                        'selected' => [],
+                        'skipped_active' => [],
+                        'count' => 0,
+                        'exit_code' => 0,
+                    ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
+                } else {
+                    $output->writeln('<info>No cached repositories.</info>');
+                }
                 return Command::SUCCESS;
             }
 
@@ -75,41 +88,79 @@ final class CachePruneCommand extends Command
             }
 
             uasort($selected, static fn (array $a, array $b): int => $a['last_used'] <=> $b['last_used']);
+            $processed = [];
             foreach ($selected as $entry) {
-                $output->writeln(sprintf(
-                    '%s %s (%s)',
-                    $dryRun ? 'Would prune:' : 'Pruning:',
-                    $entry['repository'],
-                    $this->formatBytes($entry['size']),
-                ));
+                if (!$json) {
+                    $output->writeln(sprintf(
+                        '%s %s (%s)',
+                        $dryRun ? 'Would prune:' : 'Pruning:',
+                        $entry['repository'],
+                        $this->formatBytes($entry['size']),
+                    ));
+                }
 
+                $removed = false;
                 if (!$dryRun) {
                     $identity = GitRepositoryIdentity::fromUrl($entry['repository_url']);
                     $operationLock = $cache->operationLock($identity);
                     $operationLock->acquireExclusive();
                     try {
                         if ($cache->isRepositoryDirectoryActive($entry['directory'])) {
-                            $output->writeln(sprintf('<comment>Skipping active cache entry: %s</comment>', $entry['repository']));
+                            if (!$json) {
+                                $output->writeln(sprintf('<comment>Skipping active cache entry: %s</comment>', $entry['repository']));
+                            }
                             continue;
                         }
                         $this->removeTree($entry['directory']);
+                        $removed = true;
                     } finally {
                         $operationLock->release();
                     }
                 }
+
+                $processed[] = [
+                    'repository' => $entry['repository'],
+                    'size_bytes' => $entry['size'],
+                    'last_used' => gmdate('c', $entry['last_used']),
+                    'removed' => $removed,
+                ];
             }
 
-            foreach ($entries as $entry) {
-                if ($entry['active']) {
-                    $output->writeln(sprintf('<comment>Skipping active cache entry: %s</comment>', $entry['repository']));
+            $active = array_values(array_map(
+                static fn (array $entry): string => $entry['repository'],
+                array_filter($entries, static fn (array $entry): bool => $entry['active']),
+            ));
+
+            if ($json) {
+                $output->writeln(json_encode([
+                    'status' => 'success',
+                    'mode' => $dryRun ? 'dry-run' : 'prune',
+                    'older_than' => (string) $input->getOption('older-than'),
+                    'max_size' => $input->getOption('max-size'),
+                    'selected' => $processed,
+                    'skipped_active' => $active,
+                    'count' => count($processed),
+                    'exit_code' => 0,
+                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+            } else {
+                foreach ($active as $repository) {
+                    $output->writeln(sprintf('<comment>Skipping active cache entry: %s</comment>', $repository));
                 }
+                $count = count($selected);
+                $output->writeln(sprintf('<info>%d cache entr%s %s.</info>', $count, $count === 1 ? 'y' : 'ies', $dryRun ? 'would be pruned' : 'selected for pruning'));
             }
-
-            $count = count($selected);
-            $output->writeln(sprintf('<info>%d cache entr%s %s.</info>', $count, $count === 1 ? 'y' : 'ies', $dryRun ? 'would be pruned' : 'selected for pruning'));
             return Command::SUCCESS;
         } catch (CacheException $exception) {
-            $output->writeln(sprintf('<error>%s</error>', $exception->formattedMessage()));
+            if ($json) {
+                $output->writeln(json_encode([
+                    'status' => 'error',
+                    'code' => $exception->diagnosticCode,
+                    'message' => $exception->getMessage(),
+                    'exit_code' => $exception->exitCode,
+                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+            } else {
+                $output->writeln(sprintf('<error>%s</error>', $exception->formattedMessage()));
+            }
             return $exception->exitCode;
         } finally {
             if ($maintenanceLock instanceof GitCacheOperationLock) {
