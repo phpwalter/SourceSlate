@@ -67,3 +67,28 @@ jobs:
 
       - name: Verify global binary and version
         run: composer global exec sourceslate -- --version
+
+  public-https-smoke:
+    name: Public HTTPS remote build smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+
+      - run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Build docs from public HTTPS repository
+        run: >-
+          php bin/sourceslate build
+          https://github.com/phpwalter/SourceSlate.git
+          --branch=main
+          --output=.sourceslate-remote-smoke
+          --json
+
+      - name: Verify remote build output exists
+        run: test -f .sourceslate-remote-smoke/index.html
