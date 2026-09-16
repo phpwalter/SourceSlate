@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         php-version: ['8.3', '8.4']
     steps:
       - uses: actions/checkout@v4
@@ -35,6 +35,9 @@ jobs:
       - name: Run test suite
         run: composer test
 
+      - name: Audit release-critical repository invariants
+        run: php tools/release_audit.php --json
+
       - name: Check runtime environment
         run: php bin/sourceslate doctor --json
 
@@ -43,3 +46,49 @@ jobs:
 
       - name: Verify deterministic documentation
         run: php bin/sourceslate build . --config=sourceslate.example.yaml --output=.sourceslate-ci-docs --check
+
+  global-install-smoke:
+    name: Composer global install smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+
+      - name: Register checked-out package as a Composer path repository
+        run: composer global config repositories.sourceslate path "$GITHUB_WORKSPACE"
+
+      - name: Install SourceSlate globally from the clean Composer home
+        run: composer global require "phpwalter/sourceslate:@dev" --no-interaction --prefer-source
+
+      - name: Verify global binary and version
+        run: composer global exec -- sourceslate --version
+
+  public-https-smoke:
+    name: Public HTTPS remote build smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+
+      - run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Build docs from public HTTPS repository
+        run: >-
+          php bin/sourceslate build
+          https://github.com/phpwalter/SourceSlate.git
+          --branch=main
+          --output=.sourceslate-remote-smoke
+          --json
+
+      - name: Verify remote build output exists
+        run: test -f .sourceslate-remote-smoke/index.html

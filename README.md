@@ -1,10 +1,8 @@
 # SourceSlate
 
-SourceSlate is a modern static documentation generator for PHP source code and PHPDoc. It is designed as a straightforward alternative to legacy documentation generators: point it at a local PHP codebase or a remote Git repository and generate interconnected, searchable documentation with links back to source.
+SourceSlate is a deterministic static documentation generator for PHP source code and PHPDoc. Point it at a local PHP codebase or a remote Git repository and it produces interconnected, searchable static documentation with source links, symbol relationships, PHPDoc metadata, and reproducible output.
 
-## Status
-
-SourceSlate is under active development. The current foundation includes deterministic PHP source discovery, PHPDoc parsing through PHPStan's grammar, semantic tag handlers, a renderer-neutral documentation model, YAML configuration, an initial static HTML renderer, deterministic staging/publishing, remote Git source resolution, and a persistent Git repository cache.
+SourceSlate 1.0 targets PHP 8.3 and PHP 8.4 and is designed for local development, CI, monorepos, and cached remote-repository documentation builds.
 
 ## Requirements
 
@@ -12,203 +10,235 @@ SourceSlate is under active development. The current foundation includes determi
 - Composer
 - Git when documenting remote repositories
 
-## Development installation
+## Installation
+
+During development:
 
 ```powershell
 cd L:\var\www\SourceSlate
 composer install
+php bin\sourceslate --version
 ```
 
-To make the development checkout callable from anywhere on Windows, create a wrapper such as `L:\bin\sourceslate.cmd`:
+The Composer package exposes the `sourceslate` binary, so the intended installed form is:
 
-```bat
-@echo off
-php L:\var\www\SourceSlate\bin\sourceslate %*
+```bash
+composer global require phpwalter/sourceslate
+sourceslate --version
 ```
 
-Add `L:\bin` to your user `PATH`.
+Until the package is published or refreshed on Packagist, use the development checkout or a Composer path repository. See `docs/guides/installation.md` for Windows, Linux, macOS, global Composer, and upgrade guidance.
 
 ## Local usage
 
 The preferred zero-configuration form is:
 
-```powershell
-cd L:\var\www\SomePhpProject
+```bash
 sourceslate .
 ```
 
-The path-first form is equivalent to the explicit build command:
+It is equivalent to:
 
-```powershell
+```bash
 sourceslate build .
 ```
 
-You can also target another local project directly:
+You can target another local project directly:
 
-```powershell
-sourceslate L:\var\www\AnotherProject
+```bash
+sourceslate /path/to/project
 ```
 
-which is equivalent to:
+SourceSlate reads `sourceslate.yaml` when present and otherwise applies deterministic defaults.
 
-```powershell
-sourceslate build L:\var\www\AnotherProject
+Useful local controls include:
+
+```bash
+sourceslate . --config=sourceslate.yaml
+sourceslate . --output=docs-generated
+sourceslate . --dry-run
+sourceslate . --json
+sourceslate . --ci
+sourceslate . --check
+sourceslate . --update-source
 ```
 
-SourceSlate reads `sourceslate.yaml` when present and otherwise uses zero-configuration defaults.
+`--check` renders into staging and fails when the deterministic generated tree differs from the currently published output.
+
+`--update-source` updates local PHP source headers with portable `@sourceslate` documentation links. Updates are atomic and idempotent. Source mutation is forbidden for remote Git sources, and the documentation output must remain inside the local project tree when source-header updates are enabled.
 
 ## Remote Git repositories
 
-SourceSlate can document a remote Git repository directly. Remote builds require an explicit output directory because the checked-out source workspace is cache-managed and must never be used as the publication destination.
+Remote builds require an explicit output directory because cached worktrees are documentation inputs and are never publication destinations.
 
-```powershell
-sourceslate https://github.com/vendor/project.git --output .\docs-generated
+```bash
+sourceslate https://github.com/vendor/project.git --output=docs-generated
 ```
 
-Select a branch, tag, or ref explicitly when required:
+Select source state explicitly when needed:
 
-```powershell
-sourceslate https://github.com/vendor/project.git --branch develop --output .\docs-generated
-sourceslate https://github.com/vendor/project.git --tag v2.4.0 --output .\docs-generated
-sourceslate https://github.com/vendor/project.git --ref 0123456789abcdef --output .\docs-generated
+```bash
+sourceslate https://github.com/vendor/project.git --branch=develop --output=docs-generated
+sourceslate https://github.com/vendor/project.git --tag=v2.4.0 --output=docs-generated
+sourceslate https://github.com/vendor/project.git --ref=0123456789abcdef0123456789abcdef01234567 --output=docs-generated
 ```
 
-For a monorepo or repository whose PHP project lives below the repository root, use `--source-path`:
+For monorepos:
 
-```powershell
-sourceslate https://github.com/vendor/monorepo.git --source-path packages/api --output .\docs-api
+```bash
+sourceslate https://github.com/vendor/monorepo.git \
+  --source-path=packages/api \
+  --output=docs-api
 ```
 
-SourceSlate resolves the requested Git ref to a commit SHA and records the resolved source state in its build metadata. This makes repeated builds auditable and allows callers to compare the commit SHA used for documentation generation.
+Remote-source controls include:
 
-### Remote-source controls
-
-```powershell
-sourceslate <repository> --output .\docs --refresh
-sourceslate <repository> --output .\docs --offline
-sourceslate <repository> --output .\docs --recurse-submodules
-sourceslate <repository> --output .\docs --git-timeout 120
-sourceslate <repository> --output .\docs --dry-run
-sourceslate <repository> --output .\docs --json
-sourceslate <repository> --output .\docs --ci
+```bash
+sourceslate <repository> --output=docs --refresh
+sourceslate <repository> --output=docs --offline
+sourceslate <repository> --output=docs --recurse-submodules
+sourceslate <repository> --output=docs --git-timeout=120
+sourceslate <repository> --output=docs --dry-run
+sourceslate <repository> --output=docs --json
 ```
 
-`--offline` prohibits remote access and succeeds only when the requested repository/ref can be satisfied from the persistent cache. `--refresh` forces remote revalidation when supported. `--source-type=local|git` can be used when automatic source interpretation is ambiguous.
+SourceSlate resolves the requested ref to a commit SHA and records that state in build/cache metadata. Plain ref names that collide between a branch and tag are rejected rather than guessed; use `--branch` or `--tag` to disambiguate.
 
-## Build behavior
-
-Useful build controls include:
-
-```powershell
-sourceslate build . --config sourceslate.yaml
-sourceslate build . --output .\docs-generated
-sourceslate build . --force-output
-sourceslate build . --dry-run
-sourceslate build . --json
-sourceslate build . --ci
-sourceslate build . --check
-sourceslate build . --update-source
-```
-
-`--check` renders into a staging area and exits unsuccessfully if the generated documentation differs from the currently published output. This mode is intended for CI drift enforcement.
-
-`--force-output` allows SourceSlate to replace a non-empty output directory that is not already SourceSlate-managed. Use it deliberately; the output guard otherwise refuses to overwrite an unrelated directory.
-
-`--update-source` is not permitted for remote Git sources. Source-header mutation remains reserved by the 1.0 contract and is not enabled in this foundation build.
+See `docs/guides/remote-repositories.md` and `docs/guides/monorepos.md`.
 
 ## Persistent Git cache
 
-Remote repositories are cloned into a persistent SourceSlate cache so subsequent runs can reuse repository data rather than performing a fresh clone for every build. Cache entries include repository identity and source-state metadata and are protected by locking while active.
+Remote repositories are stored in a persistent canonical repository cache so repeated builds can reuse existing objects and clean worktrees.
 
-The cache can be inspected and maintained with:
+Cache commands:
 
-```powershell
-sourceslate cache:list
-sourceslate cache:info
-sourceslate cache:verify
-sourceslate cache:repair
-sourceslate cache:prune --dry-run
-sourceslate cache:prune --older-than 90d
-sourceslate cache:prune --older-than 30d --max-size 10GB
-sourceslate cache:clear
+```bash
+sourceslate cache:list --json
+sourceslate cache:info <repository>
+sourceslate cache:verify --json
+sourceslate cache:repair <repository> --yes --json
+sourceslate cache:prune --older-than=90d --dry-run --json
+sourceslate cache:clean --older-than=24h --dry-run --json
+sourceslate cache:clear --yes --json
 ```
 
-`cache:prune` skips cache entries that are actively locked by another SourceSlate operation. Use `--dry-run` before destructive maintenance when you want to review the selected entries first.
+Cache operations use maintenance and repository locks. Active entries are protected from destructive repair, prune, and clear operations. `cache:verify` validates metadata identity, bare repository integrity, recorded origin identity, and cached worktrees. Repair stages and verifies a replacement before swapping it into place.
 
 ## Configuration precedence
 
-Configuration is merged deterministically from lowest to highest precedence:
+Configuration is merged from lowest to highest precedence:
 
 1. built-in defaults
 2. user-level SourceSlate configuration
 3. repository-root `sourceslate.yaml`
-4. source-path `sourceslate.yaml` when the selected source is below the repository root
-5. the file referenced by `SOURCESLATE_CONFIG`
-6. the explicit `--config` file
+4. source-path `sourceslate.yaml`
+5. `SOURCESLATE_CONFIG`
+6. explicit `--config`
 
-This lets a repository define normal documentation behavior while still allowing user, environment, and invocation-specific overrides.
+Repository-controlled configuration cannot define security-sensitive top-level sections such as `git`, `cache`, `security`, or `credentials`.
 
-Repository-controlled configuration is intentionally restricted from defining security-sensitive sections such as `git`, `cache`, `security`, or `credentials`. Those values must come from trusted user/environment/explicit configuration rather than an untrusted repository checkout.
-
-### User configuration locations
-
-SourceSlate looks for the user configuration in the platform-standard location:
+User configuration locations:
 
 - Windows: `%APPDATA%\SourceSlate\config.yaml`
 - macOS: `~/Library/Application Support/SourceSlate/config.yaml`
 - Linux/Unix: `~/.config/sourceslate/config.yaml`
 
-See `sourceslate.example.yaml` for the current repository configuration shape.
+Inspect the resolved configuration with:
+
+```bash
+sourceslate config:show .
+```
+
+See `sourceslate.example.yaml` and `docs/reference/configuration.md`.
 
 ## Diagnostics
 
 Run:
 
-```powershell
+```bash
 sourceslate doctor
+sourceslate doctor --json
 ```
 
-for an environment diagnostic, including prerequisites needed by the current SourceSlate installation.
+`doctor` checks the PHP/runtime environment, Git, cache and lock paths, shallow cache health, project/configuration/source paths, and output safety. Use `cache:verify --json` for deeper Git cache integrity checks.
 
-## PHPDoc architecture
+Stable diagnostics are documented in `docs/reference/diagnostics.md`.
 
-SourceSlate parses each PHPDoc block once through `phpstan/phpdoc-parser`. A tag dispatcher then routes parsed tags to semantic handlers. Individual handlers do not reimplement PHPDoc or PHPStan type grammar.
+## PHP and PHPDoc coverage
 
-Initial semantic handlers include:
+SourceSlate models:
 
-- `@param`
-- `@return`
-- `@throws`
-- `@sourceslate`
+- classes, interfaces, traits, and enums
+- top-level functions and methods
+- properties, including promoted and readonly properties
+- constants and enum cases
+- nullable, union, and intersection native types
+- parameter defaults
+- native PHP attributes and their arguments
+- source locations and source pages
 
-Unknown tags are preserved losslessly for rendering and future semantic support.
+PHPDoc is parsed once through `phpstan/phpdoc-parser` and routed through semantic tag handlers. Standard metadata includes parameters, return values, exceptions, variables/properties/methods, templates, inheritance/deprecation/see-style tags, and SourceSlate metadata. Unsupported tags are retained losslessly through the unknown-tag fallback.
 
-## Documentation model
+See `docs/reference/phpdoc.md`.
 
-SourceSlate is intentionally layered:
+## Symbol resolution and generated site
 
-```text
-PHP source
-   |
-   v
-nikic/php-parser
-   |
-   +--> native declarations and source structure
-   |
-   v
-PHPStan PHPDoc parser
-   |
-   v
-semantic tag handlers
-   |
-   v
-renderer-neutral documentation model
-   |
-   v
-static HTML renderer
+SourceSlate builds a deterministic project-wide symbol index. It resolves fully qualified references and unambiguous same-namespace short names for types, methods, properties, constants, enum cases, and functions. Ambiguous short names are never resolved by guesswork.
+
+The generated site includes:
+
+- project overview
+- namespace pages
+- class/interface/trait/enum pages
+- function and member documentation
+- source browser pages with line anchors
+- internal inheritance/trait/interface and `@see` links when unambiguous
+- deterministic search index
+- keyboard-usable client-side search
+- responsive light/dark/system styling
+
+Generated text is escaped. Client-side search creates DOM nodes and assigns generated text through text properties rather than interpolating it into executable HTML.
+
+## Determinism and publication safety
+
+Documentation is rendered into a staging tree before publication. When replacing existing documentation, SourceSlate preserves the prior tree until the new staging tree has been published successfully.
+
+If publication fails, SourceSlate attempts to restore the last-known-good tree. If automatic restoration also fails, the backup path is preserved for manual recovery.
+
+The regression suite includes full-tree reproducibility and forced publication-failure tests. `tools/benchmark.php` provides parse/render/total timing and peak-memory measurements.
+
+## CI and release quality
+
+The repository CI matrix covers PHP 8.3 and 8.4 on Linux, Windows, and macOS. It validates Composer metadata, PHP syntax, PHPUnit tests, release-critical repository invariants, `doctor --json`, a documentation build, and deterministic `--check`.
+
+A separate clean Composer-global installation smoke job verifies package/bin wiring from the checked-out repository.
+
+Useful local quality gate:
+
+```bash
+composer check
 ```
 
-This separation allows future diagnostics, validation, additional output formats, richer relationship analysis, and alternate source providers without coupling the parser directly to HTML or Git.
+Release readiness is documented in `docs/release/1.0-acceptance.md`. Repository coverage is intentionally separated from external validation such as Packagist publication and real private HTTPS/SSH credential paths.
+
+## Documentation
+
+- Architecture: `docs/ARCHITECTURE.md`
+- Installation: `docs/guides/installation.md`
+- CI: `docs/guides/ci.md`
+- Remote repositories: `docs/guides/remote-repositories.md`
+- Monorepos: `docs/guides/monorepos.md`
+- Troubleshooting: `docs/guides/troubleshooting.md`
+- Security model: `docs/guides/security.md`
+- Configuration reference: `docs/reference/configuration.md`
+- PHPDoc reference: `docs/reference/phpdoc.md`
+- Diagnostics: `docs/reference/diagnostics.md`
+- Release process: `docs/release/process.md`
+- 1.0 acceptance gate: `docs/release/1.0-acceptance.md`
+
+## Contributing
+
+See `CONTRIBUTING.md`. SourceSlate favors deterministic behavior, explicit failure, lossless source metadata, local-only tests for Git behavior where possible, and focused regression coverage for corrected defects.
 
 ## License
 

@@ -70,16 +70,20 @@ final readonly class OutputGuard
     {
         $candidate = $path;
         while ($candidate !== dirname($candidate)) {
-            if (file_exists($candidate) || is_link($candidate)) {
-                if (is_link($candidate)) {
-                    throw new OutputException(
-                        'SS-OUT-0042',
-                        sprintf('Output path traverses a symbolic link: %s', $candidate),
-                        42,
-                    );
-                }
+            if (is_link($candidate) && !$this->isFilesystemRootAlias($candidate)) {
+                throw new OutputException(
+                    'SS-OUT-0042',
+                    sprintf('Output path traverses a symbolic link: %s', $candidate),
+                    42,
+                );
             }
             $candidate = dirname($candidate);
         }
+    }
+
+    private function isFilesystemRootAlias(string $path): bool
+    {
+        $parent = dirname($path);
+        return $parent === dirname($parent);
     }
 }
