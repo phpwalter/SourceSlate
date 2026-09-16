@@ -119,6 +119,32 @@ final class OutputGuardTest extends TestCase
         }
     }
 
+    public function testSymlinkedParentBelowFilesystemRootIsRejectedWhenSymlinksAreSupported(): void
+    {
+        if (!function_exists('symlink')) {
+            self::markTestSkipped('symlink() is unavailable.');
+        }
+
+        $root = $this->temporaryDirectory();
+        $target = $root . DIRECTORY_SEPARATOR . 'target-parent';
+        $linkedParent = $root . DIRECTORY_SEPARATOR . 'linked-parent';
+        mkdir($target);
+
+        if (!@symlink($target, $linkedParent)) {
+            $this->removeDirectory($root);
+            self::markTestSkipped('Creating symlinks is not permitted in this environment.');
+        }
+
+        try {
+            $this->expectException(OutputException::class);
+            $this->expectExceptionMessage('Output path traverses a symbolic link');
+            (new OutputGuard())->assertWritable($linkedParent . DIRECTORY_SEPARATOR . 'docs');
+        } finally {
+            @unlink($linkedParent);
+            $this->removeDirectory($root);
+        }
+    }
+
     private function temporaryDirectory(): string
     {
         $root = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'sourceslate-output-' . bin2hex(random_bytes(6));
